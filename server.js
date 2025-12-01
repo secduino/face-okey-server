@@ -4,11 +4,8 @@ const cors = require("cors");
 const { Server } = require("socket.io");
 
 const gameSocket = require("./sockets/game_socket");
-const vipSocket = require("./sockets/vip_socket"); // VIP Sockets
+const vipSocket = require("./sockets/vip_socket"); // VIP socket
 
-// ------------------------------------------------
-// APP
-// ------------------------------------------------
 const app = express();
 app.use(cors());
 
@@ -16,19 +13,8 @@ app.get("/", (req, res) => {
   res.send("FACE Okey Server Running");
 });
 
-// ------------------------------------------------
-// HTTP SERVER
-// ------------------------------------------------
 const server = http.createServer(app);
 
-// ------------------------------------------------
-// GLOBAL ROOM LIST (VIP Rooms)
-// ------------------------------------------------
-const rooms = []; // VIP odalar burada tutulacak
-
-// ------------------------------------------------
-// SOCKET.IO
-// ------------------------------------------------
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -36,16 +22,16 @@ const io = new Server(server, {
   }
 });
 
-// ------------------------------------------------
-// SOCKET CONNECTION
-// ------------------------------------------------
+// VIP odaları burada tutuyoruz
+const rooms = [];
+
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  // Game Logic
+  // Normal oyun soketi
   gameSocket(io, socket);
 
-  // VIP Room Logic
+  // VIP soketi (EN ÖNEMLİSİ BU)
   vipSocket(io, socket, rooms);
 
   socket.on("disconnect", () => {
@@ -53,9 +39,6 @@ io.on("connection", (socket) => {
   });
 });
 
-// ------------------------------------------------
-// SERVER LISTEN
-// ------------------------------------------------
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Server running on port:", PORT);
