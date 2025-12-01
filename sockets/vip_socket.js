@@ -18,7 +18,10 @@ module.exports = (io, socket, rooms) => {
 
     rooms.push(room);
 
+    console.log("VIP ROOM CREATED:", room);
+
     socket.emit("vip:room_created", room);
-    io.emit("vip:rooms", rooms); // TÜM CİHAZLARA yayın
+
+    io.emit("vip:rooms", rooms);
   });
 };
