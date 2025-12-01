@@ -1,70 +1,62 @@
-// ------------------------
-// GLOBAL ODA LİSTESİ
-// ------------------------
-const vipRooms = [];  
-let roomCounter = 1;
+// -----------------------------
+// OKEY GAME SOCKET
+// -----------------------------
 
 module.exports = (io, socket) => {
 
-  // ODAYI TÜM KULLANICILARA GÖNDER
-  const broadcastRooms = () => {
-    io.emit("vip:rooms", vipRooms);
-  };
+  // Oyuncu masaya bağlandığında
+  socket.on("game:join_table", ({ roomId, user }) => {
+    socket.join(roomId);
 
-  // ------------------------
-  // VIP ODA OLUŞTUR
-  // ------------------------
-  socket.on("vip:create_room", (data) => {
-    const roomId = "ROOM_" + roomCounter++;
+    console.log(`User ${user.id} joined table ${roomId}`);
 
-    const newRoom = {
-      id: roomId,
-      name: data.name,
-      bet: data.bet,
-      ownerId: data.ownerId,
-      players: []
-    };
-
-    vipRooms.push(newRoom);
-
-    // Oda oluşturan cihaza bildirim
-    socket.emit("vip:room_created", newRoom);
-
-    // Diğer kullanıcıların listesi güncellensin
-    broadcastRooms();
-  });
-
-  // ------------------------
-  // ODA LİSTESİ İSTE → TEK KOD
-  // ------------------------
-  socket.on("vip:get_rooms", () => {
-    socket.emit("vip:rooms", vipRooms);
-  });
-
-  // ------------------------
-  // ODAYA KATIL
-  // ------------------------
-  socket.on("vip:join_room", ({ roomId, user }) => {
-    const room = vipRooms.find(r => r.id === roomId);
-    if (!room) return;
-
-    if (room.players.some(p => p.id === user.id)) return;
-
-    room.players.push(user);
-
-    io.to(socket.id).emit("vip:joined_room", room);
-
-    broadcastRooms();
-  });
-
-  // ------------------------
-  // OYUNCU AYRILIRSA
-  // ------------------------
-  socket.on("disconnect", () => {
-    vipRooms.forEach(room => {
-      room.players = room.players.filter(p => p.socketId !== socket.id);
+    // Tüm odaya bildir
+    io.to(roomId).emit("game:player_joined", {
+      user,
+      roomId
     });
-
-    broadcastRooms();
   });
+
+  // Oyuncu odadan ayrılırsa
+  socket.on("game:leave_table", ({ roomId, userId }) => {
+    socket.leave(roomId);
+
+    console.log(`User ${userId} left table ${roomId}`);
+
+    io.to(roomId).emit("game:player_left", {
+      userId,
+      roomId
+    });
+  });
+
+  // Masadan genel broadcast (taş dağıtma, sıra geçme vb.)
+  socket.on("game:update_state", ({ roomId, state }) => {
+    io.to(roomId).emit("game:state_changed", state);
+  });
+
+  // Çekilen taş
+  socket.on("game:draw_tile", ({ roomId, tile, userId }) => {
+    io.to(roomId).emit("game:tile_drawn", { tile, userId });
+  });
+
+  // Atılan taş
+  socket.on("game:discard_tile", ({ roomId, tile, userId }) => {
+    io.to(roomId).emit("game:tile_discarded", { tile, userId });
+  });
+
+  // Oyuncu "oku" bastı → hazır oldu
+  socket.on("game:ready", ({ roomId, userId }) => {
+    io.to(roomId).emit("game:ready_update", { userId });
+  });
+
+  // Oyun başladığında
+  socket.on("game:start", (roomId) => {
+    io.to(roomId).emit("game:started");
+  });
+
+  // Soket disconnect
+  socket.on("disconnect", () => {
+    console.log("Game socket user disconnected:", socket.id);
+  });
+
 };
