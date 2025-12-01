@@ -4,7 +4,7 @@ const cors = require("cors");
 const { Server } = require("socket.io");
 
 const gameSocket = require("./sockets/game_socket");
-const vipSocket = require("./sockets/vip_socket"); // VIP socket
+const vipSocket = require("./sockets/vip_socket");
 
 const app = express();
 app.use(cors());
@@ -22,16 +22,16 @@ const io = new Server(server, {
   }
 });
 
-// VIP odaları burada tutuyoruz
+// VIP odalarının tutulduğu global liste
 const rooms = [];
 
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  // Normal oyun soketi
+  // Normal oyun socket
   gameSocket(io, socket);
 
-  // VIP soketi (EN ÖNEMLİSİ BU)
+  // VIP odaları socket
   vipSocket(io, socket, rooms);
 
   socket.on("disconnect", () => {
