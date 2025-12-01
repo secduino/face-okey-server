@@ -1,12 +1,12 @@
 module.exports = (io, socket, rooms) => {
-  
-  // ODA LİSTELEME
+
+  // VIP ODA LİSTELEME
   socket.on("vip:list_rooms", () => {
     console.log("vip:list_rooms -> gönderildi");
     socket.emit("vip:rooms", rooms);
   });
 
-  // ODA OLUŞTURMA
+  // VIP ODA OLUŞTURMA
   socket.on("vip:create_room", (data) => {
     const room = {
       id: "room_" + Date.now(),
@@ -20,8 +20,11 @@ module.exports = (io, socket, rooms) => {
 
     console.log("VIP ROOM CREATED:", room);
 
+    // Odayı oluşturan kişiye bilgi
     socket.emit("vip:room_created", room);
 
+    // Herkese oda listesini yayınla
     io.emit("vip:rooms", rooms);
   });
+
 };
