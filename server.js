@@ -1,45 +1,46 @@
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
-const { Server } = require("socket.io");
+const socketIO = require("socket.io");
 
-const gameSocket = require("./sockets/game_socket");
-const vipSocket = require("./sockets/vip_socket");
+// Global VIP Room Yapısı
+const vipRooms = [];
 
+// Express Setup
 const app = express();
 app.use(cors());
 
-app.get("/", (req, res) => {
-  res.send("FACE Okey Server Running");
-});
-
 const server = http.createServer(app);
-
-const io = new Server(server, {
+const io = socketIO(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
   }
 });
 
-// VIP odalarının tutulduğu global liste
-const rooms = [];
+// SOCKET DOSYALARI
+const gameSocket = require("./sockets/game_socket");
+const vipSocket = require("./sockets/vip_socket");
 
+// ==============================
+// SOCKET BAĞLANTISI
+// ==============================
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
+  console.log("Yeni kullanıcı bağlandı:", socket.id);
 
-  // Normal oyun socket
+  // VIP SOKETLERİ
+  vipSocket(io, socket, vipRooms);
+
+  // OKEY MASA SOKETLERİ
   gameSocket(io, socket);
 
-  // VIP odaları socket
-  vipSocket(io, socket, rooms);
-
   socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
+    console.log("Kullanıcı ayrıldı:", socket.id);
   });
 });
 
+// Server Başlatma
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("Server running on port:", PORT);
+  console.log(`SERVER ÇALIŞIYOR → PORT: ${PORT}`);
 });
