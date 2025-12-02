@@ -5,17 +5,14 @@
 module.exports = (io, socket) => {
 
   // Oyuncu masaya bağlandığında
-  socket.on("game:join_table", ({ roomId, user }) => {
-    socket.join(roomId);
+ socket.on("game:join_table", ({ tableId, user }) => {
+     socket.join(tableId);
 
-    console.log(`User ${user.id} joined table ${roomId}`);
-
-    // Tüm odaya bildir
-    io.to(roomId).emit("game:player_joined", {
-      user,
-      roomId
-    });
-  });
+     io.to(tableId).emit("game:player_joined", {
+       user,
+       tableId
+     });
+ });
 
   // Oyuncu odadan ayrılırsa
   socket.on("game:leave_table", ({ roomId, userId }) => {
@@ -60,3 +57,4 @@ module.exports = (io, socket) => {
   });
 
 };
+
