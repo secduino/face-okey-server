@@ -19,7 +19,7 @@ module.exports = (io, socket, vipRooms) => {
       bet: data.bet,
 
       players: [],
-      tables: []        // 🔥 MASALAR BURADA
+      tables: []
     };
 
     vipRooms.push(room);
@@ -32,16 +32,15 @@ module.exports = (io, socket, vipRooms) => {
   // ============================
   // VIP ODAYA GİRİŞ
   // ============================
-  socket.on("vip:join_room", (data) => {
-    const { roomId, user } = data;
-
+  socket.on("vip:join_room", ({ roomId, user }) => {
     const room = vipRooms.find(r => r.id === roomId);
+
     if (!room) {
-      socket.emit("vip:error", { message: "Oda yok" });
+      socket.emit("vip:error", { message: "Oda bulunamadı" });
       return;
     }
 
-    // Odaya dahil et
+    // Kullanıcı ekle
     if (!room.players.find(p => p.id === user.id)) {
       room.players.push({
         id: user.id,
@@ -53,14 +52,14 @@ module.exports = (io, socket, vipRooms) => {
 
     socket.join(roomId);
 
-    // 🔥 Bu oda detaylarını sadece yeni girene gönder
+    // Yeni girene oda bilgisi
     socket.emit("vip:room_joined", {
       room,
       players: room.players,
       tables: room.tables
     });
 
-    // 🔥 Oda içindeki diğer kullanıcılara sadece kullanıcı listesi
+    // Oda içindeki herkese kullanıcı listesi
     io.to(roomId).emit("vip:room_users", room.players);
   });
 
@@ -68,29 +67,21 @@ module.exports = (io, socket, vipRooms) => {
   // ============================
   // VIP ODADA MASA OLUŞTURMA
   // ============================
-  socket.on("vip:create_table", (data) => {
-    const { roomId, ownerId } = data;
-
+  socket.on("vip:create_table", ({ roomId, ownerId }) => {
     const room = vipRooms.find(r => r.id === roomId);
-    if (!room) {
-      socket.emit("vip:error", { message: "Oda bulunamadı" });
-      return;
-    }
+    if (!room) return;
 
     const table = {
       id: "table_" + Date.now(),
       name: "Masa " + (room.tables.length + 1),
-      roomId: roomId,
-      ownerId: ownerId,
+      roomId,
+      ownerId,
       players: []
     };
 
     room.tables.push(table);
 
-    // 🔥 Masa oluşturan kullanıcıya masa bilgisi
     socket.emit("vip:table_created", table);
-
-    // 🔥 Oda içindeki herkese yeni masa listesi
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
@@ -106,6 +97,7 @@ module.exports = (io, socket, vipRooms) => {
     const table = room.tables.find(t => t.id === tableId);
     if (!table) return;
 
+    // Kullanıcı masaya ekle
     if (!table.players.find(p => p.id === user.id)) {
       table.players.push(user);
     }
@@ -113,7 +105,6 @@ module.exports = (io, socket, vipRooms) => {
     socket.join(tableId);
 
     socket.emit("vip:table_joined", table);
-
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
