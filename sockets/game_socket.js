@@ -1,60 +1,55 @@
 // -----------------------------
-// OKEY GAME SOCKET
+// OKEY GAME SOCKET (MASA)
 // -----------------------------
 
 module.exports = (io, socket) => {
 
-  // Oyuncu masaya bağlandığında
- socket.on("game:join_table", ({ tableId, user }) => {
-     socket.join(tableId);
+  // MASAYA GİRİŞ
+  socket.on("game:join_table", ({ tableId, user }) => {
+    socket.join(tableId);
 
-     io.to(tableId).emit("game:player_joined", {
-       user,
-       tableId
-     });
- });
+    console.log(`User ${user.id} joined table ${tableId}`);
 
-  // Oyuncu odadan ayrılırsa
-  socket.on("game:leave_table", ({ roomId, userId }) => {
-    socket.leave(roomId);
-
-    console.log(`User ${userId} left table ${roomId}`);
-
-    io.to(roomId).emit("game:player_left", {
-      userId,
-      roomId
+    io.to(tableId).emit("game:player_joined", {
+      user,
+      tableId
     });
   });
 
-  // Masadan genel broadcast (taş dağıtma, sıra geçme vb.)
-  socket.on("game:update_state", ({ roomId, state }) => {
-    io.to(roomId).emit("game:state_changed", state);
+  // MASADAN AYRILMA
+  socket.on("game:leave_table", ({ tableId, userId }) => {
+    socket.leave(tableId);
+
+    console.log(`User ${userId} left table ${tableId}`);
+
+    io.to(tableId).emit("game:player_left", {
+      userId,
+      tableId
+    });
   });
 
-  // Çekilen taş
-  socket.on("game:draw_tile", ({ roomId, tile, userId }) => {
-    io.to(roomId).emit("game:tile_drawn", { tile, userId });
+  // MASA DURUMU (OYUN STATE)
+  socket.on("game:update_state", ({ tableId, state }) => {
+    io.to(tableId).emit("game:state_changed", state);
   });
 
-  // Atılan taş
-  socket.on("game:discard_tile", ({ roomId, tile, userId }) => {
-    io.to(roomId).emit("game:tile_discarded", { tile, userId });
+  // TAŞ ÇEKME
+  socket.on("game:draw_tile", ({ tableId, tile, userId }) => {
+    io.to(tableId).emit("game:tile_drawn", { tile, userId });
   });
 
-  // Oyuncu "oku" bastı → hazır oldu
-  socket.on("game:ready", ({ roomId, userId }) => {
-    io.to(roomId).emit("game:ready_update", { userId });
+  // TAŞ ATMA
+  socket.on("game:discard_tile", ({ tableId, tile, userId }) => {
+    io.to(tableId).emit("game:tile_discarded", { tile, userId });
   });
 
-  // Oyun başladığında
-  socket.on("game:start", (roomId) => {
-    io.to(roomId).emit("game:started");
+  // OKU BASMA (Hazırım)
+  socket.on("game:ready", ({ tableId, userId }) => {
+    io.to(tableId).emit("game:ready_update", { userId });
   });
 
-  // Soket disconnect
-  socket.on("disconnect", () => {
-    console.log("Game socket user disconnected:", socket.id);
+  // OYUN BAŞLA
+  socket.on("game:start", (tableId) => {
+    io.to(tableId).emit("game:started");
   });
-
 };
-
