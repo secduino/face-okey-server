@@ -1,58 +1,54 @@
 // sockets/vip_socket.js
-// TAM SÜRÜM – TÜM VİP ÖZELLİKLER ENTEGRE EDİLMİŞ
 
 module.exports = (io, socket, vipRooms) => {
 
-  // -----------------------------------------------------
-  // Yardımcı fonksiyonlar
-  // -----------------------------------------------------
-  function findRoom(roomId) {
+  // ---------------------------------------------------------
+  // UTIL FONKSİYONLARI
+  // ---------------------------------------------------------
+  function getRoom(roomId) {
     return vipRooms.find(r => r.id === roomId);
-  }
-
-  function isOwner(room, userId) {
-    return room.ownerId === userId;
-  }
-
-  function isModerator(room, userId) {
-    return room.moderators.includes(userId);
   }
 
   function isBanned(room, userId) {
     const now = Date.now();
-    const record = room.bans.find(b => b.userId === userId);
-    if (!record) return false;
-    if (record.permanent) return true;
-    return record.expiresAt > now;
+    const ban = room.bans?.find(b => b.userId === userId);
+    if (!ban) return false;
+
+    // Süresi bitmişse ban'ı kaldır
+    if (ban.until && ban.until < now) {
+      room.bans = room.bans.filter(b => b.userId !== userId);
+      return false;
+    }
+
+    return true;
   }
 
-  // -----------------------------------------------------
-  // 1) odaları listele
-  // -----------------------------------------------------
+  // ---------------------------------------------------------
+  // VIP ODA LİSTELEME
+  // ---------------------------------------------------------
   socket.on("vip:list_rooms", () => {
     socket.emit("vip:rooms", vipRooms);
   });
 
-
-  // -----------------------------------------------------
-  // 2) VIP oda oluştur
-  // -----------------------------------------------------
+  // ---------------------------------------------------------
+  // VIP ODA OLUŞTURMA
+  // ---------------------------------------------------------
   socket.on("vip:create_room", (data) => {
+    const now = Date.now();
+
     const room = {
-      id: "vip_" + Date.now(),
+      id: "vip_" + now,
       name: data.name,
       ownerId: data.ownerId,
 
-      // Yeni özellikler:
-      moderators: [],       // yetkili kullanıcılar
-      bet: data.bet || 0,   // artık bahis değil ama field dursun
+      moderators: [],       // yetki verilen kişiler
+      bans: [],             // { userId, until }
+      chat: [],             // { id, userId, userName, msg, time }
 
-      expiresAt: Date.now() + (30 * 86400000), // varsayılan 1 aylık
+      expiresAt: now + (data.duration || 0), // PREMIUM SÜRE
 
       players: [],
-      tables: [],
-      bans: [],
-      chat: [],
+      tables: []
     };
 
     vipRooms.push(room);
@@ -61,55 +57,118 @@ module.exports = (io, socket, vipRooms) => {
     io.emit("vip:rooms", vipRooms);
   });
 
-
-  // -----------------------------------------------------
-  // 3) VIP ODAYA GİRİŞ
-  // -----------------------------------------------------
+  // ---------------------------------------------------------
+  // VIP ODAYA GİRİŞ
+  // ---------------------------------------------------------
   socket.on("vip:join_room", ({ roomId, user }) => {
-    const room = findRoom(roomId);
-
+    const room = getRoom(roomId);
     if (!room) {
       socket.emit("vip:error", { message: "Oda bulunamadı" });
       return;
     }
 
-    // BAN KONTROLÜ
+    // Ban kontrol
     if (isBanned(room, user.id)) {
-      socket.emit("vip:error", { message: "Bu odadan yasaklandınız." });
+      socket.emit("vip:error", { message: "Bu odadan yasaklandın." });
       return;
     }
 
-    // Kullanıcı zaten yoksa ekle
+    // Daha önce yoksa ekle
     if (!room.players.find(p => p.id === user.id)) {
       room.players.push({
         id: user.id,
         name: user.name,
         avatar: user.avatar || "",
-        isGuest: user.isGuest || false
+        isGuest: user.isGuest || false,
+        score: 1000,             // BAŞLANGIÇ PUANI
       });
     }
 
     socket.join(roomId);
 
-    // Yeni girene tam veri gönder
+    // Bu kullanıcıya özel oda bilgisi
     socket.emit("vip:room_joined", {
       room,
       players: room.players,
-      tables: room.tables,
-      chat: room.chat,
-      moderators: room.moderators,
+      tables: room.tables
     });
 
-    // Oda içindeki herkese oyuncu listesi gönder
+    // Tüm odaya oyuncu listesi
     io.to(roomId).emit("vip:room_users", room.players);
   });
 
+  // ---------------------------------------------------------
+  // YETKİ KONTROL FONKSİYONU
+  // ---------------------------------------------------------
+  function hasPermission(room, userId) {
+    return (
+      room.ownerId === userId ||
+      room.moderators.includes(userId)
+    );
+  }
 
-  // -----------------------------------------------------
-  // 4) VIP ODADA MASA OLUŞTURMA
-  // -----------------------------------------------------
+  // ---------------------------------------------------------
+  // MOD EKLEME / ÇIKARMA
+  // ---------------------------------------------------------
+  socket.on("vip:mod_toggle", ({ roomId, targetId, requesterId }) => {
+    const room = getRoom(roomId);
+    if (!room) return;
+
+    if (room.ownerId !== requesterId) return; // sadece owner mod verebilir
+
+    if (room.moderators.includes(targetId)) {
+      room.moderators = room.moderators.filter(id => id !== targetId);
+    } else {
+      room.moderators.push(targetId);
+    }
+
+    io.to(roomId).emit("vip:room_users", room.players);
+  });
+
+  // ---------------------------------------------------------
+  // OYUNCU ATMA (OWNER / MOD)
+  // ---------------------------------------------------------
+  socket.on("vip:kick_player", ({ roomId, targetId, requesterId }) => {
+    const room = getRoom(roomId);
+    if (!room) return;
+
+    if (!hasPermission(room, requesterId)) return;
+
+    room.players = room.players.filter(p => p.id !== targetId);
+
+    io.to(roomId).emit("vip:room_users", room.players);
+
+    // Hedef oyuncu socket odadan çıkarılır
+    io.to(roomId).emit("vip:kicked", { userId: targetId });
+  });
+
+  // ---------------------------------------------------------
+  // YASAKLAMA (BAN)
+  // ---------------------------------------------------------
+  socket.on("vip:ban_player", ({ roomId, targetId, requesterId, days }) => {
+    const room = getRoom(roomId);
+    if (!room) return;
+
+    if (!hasPermission(room, requesterId)) return;
+
+    const until = Date.now() + days * 24 * 60 * 60 * 1000;
+
+    room.bans.push({
+      userId: targetId,
+      until
+    });
+
+    room.players = room.players.filter(p => p.id !== targetId);
+
+    io.to(roomId).emit("vip:room_users", room.players);
+    io.to(roomId).emit("vip:banned", { userId: targetId, until });
+  });
+
+  // ---------------------------------------------------------
+  // VIP ODADA MASA OLUŞTURMA
+  // ---------------------------------------------------------
   socket.on("vip:create_table", ({ roomId, ownerId }) => {
-    const room = findRoom(roomId);
+    const room = getRoom(roomId);
     if (!room) return;
 
     const table = {
@@ -117,7 +176,10 @@ module.exports = (io, socket, vipRooms) => {
       name: "Masa " + (room.tables.length + 1),
       roomId,
       ownerId,
-      players: []
+      players: [],
+      hands: {},
+      deck: [],
+      currentTurnPlayerId: null
     };
 
     room.tables.push(table);
@@ -126,12 +188,11 @@ module.exports = (io, socket, vipRooms) => {
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
-
-  // -----------------------------------------------------
-  // 5) VIP MASAYA GİRİŞ
-  // -----------------------------------------------------
+  // ---------------------------------------------------------
+  // VIP MASAYA GİRİŞ
+  // ---------------------------------------------------------
   socket.on("vip:join_table", ({ tableId, roomId, user }) => {
-    const room = findRoom(roomId);
+    const room = getRoom(roomId);
     if (!room) return;
 
     const table = room.tables.find(t => t.id === tableId);
@@ -147,118 +208,24 @@ module.exports = (io, socket, vipRooms) => {
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
-
-  // -----------------------------------------------------
-  // 6) VIP CHAT MESAJI
-  // -----------------------------------------------------
-  socket.on("vip:chat_message", ({ roomId, user, message }) => {
-    const room = findRoom(roomId);
+  // ---------------------------------------------------------
+  // ODA İÇİ CHAT
+  // ---------------------------------------------------------
+  socket.on("vip:chat_message", ({ roomId, userId, userName, msg }) => {
+    const room = getRoom(roomId);
     if (!room) return;
 
-    const msg = {
-      id: "msg_" + Date.now(),
-      userId: user.id,
-      userName: user.name,
-      avatar: user.avatar || "",
-      message,
+    const chatMsg = {
+      id: Date.now(),
+      userId,
+      userName,
+      msg,
       time: Date.now()
     };
 
-    room.chat.push(msg);
-    io.to(roomId).emit("vip:chat_new_message", msg);
-  });
+    room.chat.push(chatMsg);
 
-
-  // -----------------------------------------------------
-  // 7) KICK (owner + moderator)
-  // -----------------------------------------------------
-  socket.on("vip:kick_player", ({ roomId, requesterId, targetUserId }) => {
-    const room = findRoom(roomId);
-    if (!room) return;
-
-    if (!isOwner(room, requesterId) && !isModerator(room, requesterId)) {
-      socket.emit("vip:error", { message: "Bu işlem için yetkin yok." });
-      return;
-    }
-
-    room.players = room.players.filter(p => p.id !== targetUserId);
-
-    io.to(roomId).emit("vip:room_users", room.players);
-  });
-
-
-  // -----------------------------------------------------
-  // 8) BAN (mod: 1–7 gün, owner: sınırsız)
-  // -----------------------------------------------------
-  socket.on("vip:ban_player", ({ roomId, requesterId, targetUserId, days, permanent }) => {
-    const room = findRoom(roomId);
-    if (!room) return;
-
-    if (!isOwner(room, requesterId) && !isModerator(room, requesterId)) {
-      socket.emit("vip:error", { message: "Yetkin yok." });
-      return;
-    }
-
-    if (isModerator(room, requesterId)) {
-      // mod sınırlı ban verebilir
-      if (permanent) {
-        socket.emit("vip:error", { message: "Moderator kalıcı ban veremez." });
-        return;
-      }
-      if (days < 1 || days > 7) {
-        socket.emit("vip:error", { message: "Ban süresi 1-7 gün olmalı." });
-        return;
-      }
-    }
-
-    const banRecord = {
-      userId: targetUserId,
-      createdBy: requesterId,
-      permanent: permanent || false,
-      expiresAt: permanent ? null : Date.now() + days * 86400000
-    };
-
-    room.bans.push(banRecord);
-    room.players = room.players.filter(p => p.id !== targetUserId);
-
-    io.to(roomId).emit("vip:room_users", room.players);
-  });
-
-
-  // -----------------------------------------------------
-  // 9) MODERATÖR YETKİ VER
-  // -----------------------------------------------------
-  socket.on("vip:grant_mod", ({ roomId, requesterId, targetUserId }) => {
-    const room = findRoom(roomId);
-    if (!room) return;
-
-    if (!isOwner(room, requesterId)) {
-      socket.emit("vip:error", { message: "Sadece oda sahibi mod atayabilir." });
-      return;
-    }
-
-    if (!room.moderators.includes(targetUserId)) {
-      room.moderators.push(targetUserId);
-    }
-
-    io.to(roomId).emit("vip:mods_updated", room.moderators);
-  });
-
-
-  // -----------------------------------------------------
-  // 10) MODERATÖR YETKİ KALDIR
-  // -----------------------------------------------------
-  socket.on("vip:revoke_mod", ({ roomId, requesterId, targetUserId }) => {
-    const room = findRoom(roomId);
-    if (!room) return;
-
-    if (!isOwner(room, requesterId)) {
-      socket.emit("vip:error", { message: "Sadece oda sahibi mod yetkisini kaldırabilir." });
-      return;
-    }
-
-    room.moderators = room.moderators.filter(id => id !== targetUserId);
-    io.to(roomId).emit("vip:mods_updated", room.moderators);
+    io.to(roomId).emit("vip:chat_new_message", chatMsg);
   });
 
 };
