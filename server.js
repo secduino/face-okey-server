@@ -1,46 +1,75 @@
+// server.js
+
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
-const socketIO = require("socket.io");
+const { Server } = require("socket.io");
 
-// Global VIP Room Yapısı
-const vipRooms = [];
+// Socket modülleri
+const vipSocket = require("./sockets/vip_socket");
+const gameSocket = require("./sockets/game_socket");
 
-// Express Setup
+// ==========================
+// GLOBAL VERİ YAPILARI
+// ==========================
+
+// Tüm VIP odalar tek yerden tutuluyor
+// vip_socket ve game_socket BURAYI ortak kullanıyor
+const vipRooms = []; 
+// room yapısı:
+// {
+//   id,
+//   name,
+//   ownerId,
+//   moderators: [],
+//   bet,
+//   expiresAt,
+//   players: [],
+//   tables: [],  // { id, name, roomId, ownerId, players: [], hands?, deck?, currentTurnPlayerId? }
+//   bans: [],
+//   chat: [],
+// }
+
 const app = express();
-app.use(cors());
-
 const server = http.createServer(app);
-const io = socketIO(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+
+app.use(cors());
+app.use(express.json());
+
+// Basit test endpoint
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "FACE OKEY SERVER RUNNING" });
 });
 
-// SOCKET DOSYALARI
-const gameSocket = require("./sockets/game_socket");
-const vipSocket = require("./sockets/vip_socket");
+// ==========================
+// SOCKET.IO KURULUMU
+// ==========================
+const io = new Server(server, {
+  cors: {
+    origin: "*", // istersen burayı sadece kendi domainine çekersin
+    methods: ["GET", "POST"],
+  },
+});
 
-// ==============================
-// SOCKET BAĞLANTISI
-// ==============================
+// Yeni bağlantı geldiğinde
 io.on("connection", (socket) => {
-  console.log("Yeni kullanıcı bağlandı:", socket.id);
+  console.log("Socket connected:", socket.id);
 
-  // VIP SOKETLERİ
+  // VIP oda socketleri
   vipSocket(io, socket, vipRooms);
 
-  // OKEY MASA SOKETLERİ
-  gameSocket(io, socket);
+  // Oyun masası (okey) socketleri
+  gameSocket(io, socket, vipRooms);
 
   socket.on("disconnect", () => {
-    console.log("Kullanıcı ayrıldı:", socket.id);
+    console.log("Socket disconnected:", socket.id);
   });
 });
 
-// Server Başlatma
+// ==========================
+// SUNUCUYU ÇALIŞTIR
+// ==========================
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`SERVER ÇALIŞIYOR → PORT: ${PORT}`);
+  console.log(`FACE OKEY SERVER listening on port ${PORT}`);
 });
