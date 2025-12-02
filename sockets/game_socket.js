@@ -1,181 +1,200 @@
-// ================================
-// OKEY GAME SOCKET - TẢM SÜRÜM
-// ================================
+// sockets/game_socket.js
 
 module.exports = (io, socket, vipRooms) => {
 
-  // -------------------------------------------------
-  // OKEY TAŞLARINI SENİN GÖRSELLERE GÖRE OLUŞTURMA
-  // -------------------------------------------------
-  function createDeck() {
-    const tiles = [];
-    let idCounter = 1;
-    let assetIndex = 1;
-
-    const colors = [
-      { letter: "B" }, // Mavi
-      { letter: "S" }, // Siyah
-      { letter: "R" }, // Kırmızı
-      { letter: "G" }, // Yeşil
-    ];
-
-    // 4 renk x 2 set = 104 taş
-    for (let set = 0; set < 2; set++) {
-      for (const col of colors) {
-        for (let value = 1; value <= 13; value++) {
-
-          tiles.push({
-            id: idCounter++,
-            color: col.letter,
-            value,
-            isJoker: false,
-            asset: `assets/tiles/tile${String(assetIndex).padStart(2, "0")}.png`,
-          });
-
-          assetIndex++;
-        }
-      }
+  // ---------------------------------------------------------
+  // MASAYI BUL
+  // ---------------------------------------------------------
+  function findTable(tableId) {
+    for (const room of vipRooms) {
+      const table = room.tables.find(t => t.id === tableId);
+      if (table) return { room, table };
     }
-
-    // ======================
-    // SAHTE OKEYLER
-    // ======================
-    tiles.push({
-      id: idCounter++,
-      color: "J",
-      value: 0,
-      isJoker: true,
-      asset: "assets/tiles/tile53.png",
-    });
-
-    tiles.push({
-      id: idCounter++,
-      color: "J",
-      value: 0,
-      isJoker: true,
-      asset: "assets/tiles/tile54.png",
-    });
-
-    return tiles;
+    return null;
   }
 
-  // -----------------------------------------------
-  // MASADA KİŞİ SAYISINA GÖRE TAŞ DAĞITMA
-  // -----------------------------------------------
-  function dealTiles(players) {
-    const deck = createDeck();
+  // ---------------------------------------------------------
+  // TAŞ DESTESİ OLUŞTURMA
+  // ---------------------------------------------------------
+  function createTileDeck() {
+    const deck = [];
 
-    // Karıştır
-    deck.sort(() => Math.random() - 0.5);
-
-    const hands = {};
-
-    // Başlatan oyuncu 15 taş
-    const starter = players[0].id;
-
-    for (let p of players) {
-      hands[p.id] = [];
-      const count = p.id === starter ? 15 : 14;
-
-      for (let i = 0; i < count; i++) {
-        const tile = deck.pop();
-        hands[p.id].push(tile);
-      }
-    }
-
-    return {
-      hands,
-      remainingDeck: deck,
-      currentTurnPlayerId: starter,
+    const colors = ["blue", "black", "red", "green"];
+    const startIndex = {
+      blue: 1,
+      black: 14,
+      red: 27,
+      green: 40
     };
+
+    // 1–13 arası taşların 2 seti
+    for (const color of colors) {
+      const base = startIndex[color];
+      for (let i = 0; i < 13; i++) {
+        const tileIndex = base + i;
+        const fileName = `tile${tileIndex}.png`;
+
+        deck.push({ color, number: i + 1, assetPath: "assets/tiles/" + fileName });
+        deck.push({ color, number: i + 1, assetPath: "assets/tiles/" + fileName });
+      }
+    }
+
+    // Joker taşları (tile53, tile54)
+    deck.push({ color: "joker", number: 0, assetPath: "assets/tiles/tile53.png" });
+    deck.push({ color: "joker", number: 0, assetPath: "assets/tiles/tile54.png" });
+
+    return deck;
   }
 
-  // ======================================
-  // MASAYA KATILMA
-  // ======================================
+  // ---------------------------------------------------------
+  // DESTEYİ KARIŞTIR
+  // ---------------------------------------------------------
+  function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+  }
+
+  // ---------------------------------------------------------
+  // TAS DAĞITMA (başlangıç)
+  // ---------------------------------------------------------
+  function dealTiles(table) {
+    const deck = createTileDeck();
+    shuffle(deck);
+
+    table.deck = deck;
+    table.hands = {};
+
+    const players = table.players.map(p => p.id);
+
+    // İlk oyuncu 15 taş alır
+    table.currentTurnPlayerId = players[0];
+
+    players.forEach((playerId, index) => {
+      const handSize = index === 0 ? 15 : 14;
+      table.hands[playerId] = deck.splice(0, handSize);
+    });
+  }
+
+  // ---------------------------------------------------------
+  // MASAYA BAĞLANMA
+  // ---------------------------------------------------------
   socket.on("game:join_table", ({ tableId, user }) => {
+    const info = findTable(tableId);
+    if (!info) return;
+
+    const { table } = info;
+
+    if (!table.players.find(p => p.id === user.id)) {
+      table.players.push(user);
+    }
+
+    // Socket masaya katılır
     socket.join(tableId);
 
-    console.log(`User ${user.id} joined table ${tableId}`);
-
+    // Tüm oyunculara duyur
     io.to(tableId).emit("game:player_joined", {
       user,
-      tableId,
+      tableId
     });
   });
 
-  // ======================================
+  // ---------------------------------------------------------
   // OYUN BAŞLATMA
-  // ======================================
+  // ---------------------------------------------------------
   socket.on("game:start", (tableId) => {
-    // VIP Rooms → table bul
-    let table = null;
+    const info = findTable(tableId);
+    if (!info) return;
 
-    for (let room of vipRooms) {
-      const t = room.tables.find(tb => tb.id === tableId);
-      if (t) table = t;
-    }
+    const { table } = info;
 
-    if (!table) return;
-
-    if (!table.players || table.players.length === 0) {
-      io.to(tableId).emit("game:error", { message: "Masa boş." });
+    if (table.players.length < 2) {
+      io.to(tableId).emit("game:error", {
+        message: "Oyun başlamak için en az 2 oyuncu gerekir."
+      });
       return;
     }
 
-    // Taş dağıt
-    const { hands, remainingDeck, currentTurnPlayerId } = dealTiles(
-      table.players
-    );
+    // Dağıt
+    dealTiles(table);
 
-    table.hands = hands;
-    table.deck = remainingDeck;
-    table.currentTurnPlayerId = currentTurnPlayerId;
-
+    // Tüm oyunculara gönder
     io.to(tableId).emit("game:state_changed", {
-      hands,
-      currentTurnPlayerId,
+      hands: table.hands,
+      currentTurnPlayerId: table.currentTurnPlayerId
     });
-
-    console.log("OYUN BAŞLADI MASA:", tableId);
   });
 
-  // ======================================
+  // ---------------------------------------------------------
   // TAŞ ÇEKME
-  // ======================================
+  // ---------------------------------------------------------
   socket.on("game:draw_tile", ({ tableId, userId }) => {
-    let table = null;
+    const info = findTable(tableId);
+    if (!info) return;
 
-    for (let room of vipRooms) {
-      const t = room.tables.find(tb => tb.id === tableId);
-      if (t) table = t;
-    }
+    const { table } = info;
 
-    if (!table) return;
+    if (table.currentTurnPlayerId !== userId) return;
 
-    const tile = table.deck.pop();
-    if (!tile) return;
+    if (table.deck.length === 0) return;
 
+    const tile = table.deck.shift();
     table.hands[userId].push(tile);
 
     io.to(tableId).emit("game:tile_drawn", { tile, userId });
   });
 
-  // ======================================
+  // ---------------------------------------------------------
   // TAŞ ATMA
-  // ======================================
+  // ---------------------------------------------------------
   socket.on("game:discard_tile", ({ tableId, tile, userId }) => {
-    io.to(tableId).emit("game:tile_discarded", { tile, userId });
+    const info = findTable(tableId);
+    if (!info) return;
+
+    const { table } = info;
+
+    if (table.currentTurnPlayerId !== userId) return;
+
+    // ELİNDEN TAŞI ÇIKAR
+    table.hands[userId] = table.hands[userId].filter(
+      (t) => !(t.color === tile.color && t.number === tile.number)
+    );
+
+    // SIRA DEĞİŞTİR
+    const index = table.players.findIndex(p => p.id === userId);
+    const nextIndex = (index + 1) % table.players.length;
+    table.currentTurnPlayerId = table.players[nextIndex].id;
+
+    // Tüm oyunculara duyur
+    io.to(tableId).emit("game:tile_discarded", {
+      tile,
+      userId,
+      nextTurn: table.currentTurnPlayerId
+    });
   });
 
-  // ======================================
-  // SIRA GEÇME
-  // ======================================
-  socket.on("game:pass_turn", ({ tableId, nextPlayerId }) => {
-    io.to(tableId).emit("game:turn_changed", { nextPlayerId });
+  // ---------------------------------------------------------
+  // OYUNCU AYRILDI
+  // ---------------------------------------------------------
+  socket.on("game:leave_table", ({ tableId, userId }) => {
+    const info = findTable(tableId);
+    if (!info) return;
+
+    const { table } = info;
+
+    table.players = table.players.filter(p => p.id !== userId);
+
+    io.to(tableId).emit("game:player_left", { userId });
+
+    socket.leave(tableId);
   });
 
+  // ---------------------------------------------------------
+  // CLIENT SOKET KAPANDI
+  // ---------------------------------------------------------
   socket.on("disconnect", () => {
-    console.log("Game socket user disconnected:", socket.id);
+    console.log("Game socket disconnected:", socket.id);
   });
+
 };
