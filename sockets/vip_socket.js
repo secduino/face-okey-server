@@ -1,67 +1,120 @@
-module.exports = (io, socket, rooms) => {
+module.exports = (io, socket, vipRooms) => {
 
-  // ================================
+  // ============================
   // VIP ODA LİSTELEME
-  // ================================
+  // ============================
   socket.on("vip:list_rooms", () => {
-    socket.emit("vip:rooms", rooms);
+    socket.emit("vip:rooms", vipRooms);
   });
 
-  // ================================
+
+  // ============================
   // VIP ODA OLUŞTURMA
-  // ================================
+  // ============================
   socket.on("vip:create_room", (data) => {
     const room = {
-      id: "room_" + Date.now(),
+      id: "vip_" + Date.now(),
       name: data.name,
-      bet: data.bet,
       ownerId: data.ownerId,
-      players: []
+      bet: data.bet,
+
+      players: [],
+      tables: []        // 🔥 MASALAR BURADA
     };
 
-    rooms.push(room);
+    vipRooms.push(room);
 
-    console.log("VIP ROOM CREATED:", room);
-
-    // Odayı oluşturan kişiye geri gönder
     socket.emit("vip:room_created", room);
-
-    // Herkese oda listesini gönder
-    io.emit("vip:rooms", rooms);
+    io.emit("vip:rooms", vipRooms);
   });
 
-  // ================================
-  // VIP ODAYA KATILMA  🔥 SORUN BURADAYDI
-  // ================================
+
+  // ============================
+  // VIP ODAYA GİRİŞ
+  // ============================
   socket.on("vip:join_room", (data) => {
-    const roomId = data.roomId;
-    const user = data.user;
+    const { roomId, user } = data;
 
-    const room = rooms.find(r => r.id === roomId);
-
+    const room = vipRooms.find(r => r.id === roomId);
     if (!room) {
-      socket.emit("vip:error", { message: "Oda bulunamadı" });
+      socket.emit("vip:error", { message: "Oda yok" });
       return;
     }
 
-    // Aynı kullanıcı 2 kere eklenmesin
-    const already = room.players.find(p => p.id === user.id);
-    if (!already) {
+    // Odaya dahil et
+    if (!room.players.find(p => p.id === user.id)) {
       room.players.push({
         id: user.id,
-        name: user.name || "Player",
+        name: user.name,
         avatar: user.avatar || "",
         isGuest: user.isGuest || false
       });
     }
 
-    console.log("VIP ROOM JOINED:", room);
+    socket.join(roomId);
 
-    // Katılan kullanıcıya özel cevap
-    socket.emit("vip:room_joined", room);
+    // 🔥 Bu oda detaylarını sadece yeni girene gönder
+    socket.emit("vip:room_joined", {
+      room,
+      players: room.players,
+      tables: room.tables
+    });
 
-    // Diğer herkese güncel oda listesini gönder
-    io.emit("vip:rooms", rooms);
+    // 🔥 Oda içindeki diğer kullanıcılara sadece kullanıcı listesi
+    io.to(roomId).emit("vip:room_users", room.players);
+  });
+
+
+  // ============================
+  // VIP ODADA MASA OLUŞTURMA
+  // ============================
+  socket.on("vip:create_table", (data) => {
+    const { roomId, ownerId } = data;
+
+    const room = vipRooms.find(r => r.id === roomId);
+    if (!room) {
+      socket.emit("vip:error", { message: "Oda bulunamadı" });
+      return;
+    }
+
+    const table = {
+      id: "table_" + Date.now(),
+      name: "Masa " + (room.tables.length + 1),
+      roomId: roomId,
+      ownerId: ownerId,
+      players: []
+    };
+
+    room.tables.push(table);
+
+    // 🔥 Masa oluşturan kullanıcıya masa bilgisi
+    socket.emit("vip:table_created", table);
+
+    // 🔥 Oda içindeki herkese yeni masa listesi
+    io.to(roomId).emit("vip:room_tables", room.tables);
+  });
+
+
+  // ============================
+  // VIP MASAYA GİRİŞ
+  // ============================
+  socket.on("vip:join_table", ({ tableId, roomId, user }) => {
+
+    const room = vipRooms.find(r => r.id === roomId);
+    if (!room) return;
+
+    const table = room.tables.find(t => t.id === tableId);
+    if (!table) return;
+
+    if (!table.players.find(p => p.id === user.id)) {
+      table.players.push(user);
+    }
+
+    socket.join(tableId);
+
+    socket.emit("vip:table_joined", table);
+
+    io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
 };
