@@ -1,6 +1,7 @@
 // sockets/game_socket.js
 
 module.exports = (io, socket, vipRooms) => {
+
   // ---------------------------------------------------------
   // MASAYI BUL
   // ---------------------------------------------------------
@@ -14,7 +15,7 @@ module.exports = (io, socket, vipRooms) => {
   }
 
   // ---------------------------------------------------------
-  // DESTE OLUŞTURMA
+  // DESTE OLUŞTURMA (106 TAŞ)
   // ---------------------------------------------------------
   function createTileDeck() {
     const deck = [];
@@ -27,8 +28,10 @@ module.exports = (io, socket, vipRooms) => {
       }
     }
 
+    // Jokerler
     deck.push({ color: "joker", number: 0, fakeJoker: false });
     deck.push({ color: "joker", number: 0, fakeJoker: false });
+
     return deck;
   }
 
@@ -44,11 +47,11 @@ module.exports = (io, socket, vipRooms) => {
     if (idx === -1) return { deck, okeyTile: null };
 
     const indicator = deck[idx];
-    const okeyNumber = indicator.number === 13 ? 1 : indicator.number + 1;
+    const next = indicator.number === 13 ? 1 : indicator.number + 1;
 
     const okeyTile = {
       color: indicator.color,
-      number: okeyNumber,
+      number: next,
       fakeJoker: false
     };
 
@@ -63,20 +66,20 @@ module.exports = (io, socket, vipRooms) => {
     let deck = createTileDeck();
     shuffle(deck);
 
-    const { deck: d, okeyTile } = pickOkey(deck);
-    deck = d;
+    const pick = pickOkey(deck);
+    deck = pick.deck;
+    table.okeyTile = pick.okeyTile;
 
-    table.okeyTile = okeyTile;
     table.deck = deck;
-    table.hands = {};
     table.discardPile = [];
+    table.hands = {};
 
     const players = table.players.map(p => p.id.toString());
     table.currentTurnPlayerId = players[0];
 
     players.forEach((pid, index) => {
-      const handSize = index === 0 ? 15 : 14;
-      table.hands[pid] = deck.splice(0, handSize);
+      const take = index === 0 ? 15 : 14;
+      table.hands[pid] = deck.splice(0, take);
     });
   }
 
@@ -104,6 +107,7 @@ module.exports = (io, socket, vipRooms) => {
       table.players.push(user);
     }
 
+    // Yeni gelen hazır değil
     table.ready[user.id] = false;
 
     socket.join(tableId);
@@ -112,18 +116,23 @@ module.exports = (io, socket, vipRooms) => {
       tableId,
       user
     });
+
+    // Hazır bilgilerini de yeni tüm clientlara gönder
+    io.to(tableId).emit("game:ready_changed", {
+      tableId,
+      ready: table.ready
+    });
   });
 
   // ---------------------------------------------------------
-  // HAZIR BUTONU
+  // HAZIR TOGGLE (Hazır ↔ Hazır Değil)
   // ---------------------------------------------------------
-  socket.on("game:ready", ({ tableId, userId }) => {
+  socket.on("game:set_ready", ({ tableId, userId, ready }) => {
     const info = findTable(tableId);
     if (!info) return;
 
     const { table } = info;
-
-    table.ready[userId] = true;
+    table.ready[userId] = ready === true;
 
     io.to(tableId).emit("game:ready_changed", {
       tableId,
@@ -132,16 +141,26 @@ module.exports = (io, socket, vipRooms) => {
   });
 
   // ---------------------------------------------------------
-  // BAŞLATMA — SADECE MASA SAHİBİ
+  // BAŞLATMA (Sadece masa sahibi)
   // ---------------------------------------------------------
-  socket.on("game:start", ({ tableId, userId }) => {
+  socket.on("game:start", (payload) => {
+    const tableId =
+      typeof payload === "string"
+        ? payload
+        : payload.tableId || null;
+
     const info = findTable(tableId);
     if (!info) return;
 
     const { table } = info;
 
-    if (table.ownerId.toString() !== userId.toString()) {
-      socket.emit("game:error", { message: "Bu masayı sadece sahibi başlatabilir." });
+    if (!table.ownerId) {
+      socket.emit("game:error", { message: "ownerId yok." });
+      return;
+    }
+
+    if (table.ownerId.toString() !== payload.userId.toString()) {
+      socket.emit("game:error", { message: "Sadece masa sahibi başlatabilir." });
       return;
     }
 
@@ -150,11 +169,14 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
-    if (!Object.values(table.ready).every(v => v === true)) {
+    // Herkes hazır mı?
+    const allReady = Object.values(table.ready).every(v => v === true);
+    if (!allReady) {
       socket.emit("game:error", { message: "Tüm oyuncular hazır değil." });
       return;
     }
 
+    // Dağıt
     dealTiles(table);
 
     io.to(tableId).emit("game:state_changed", {
@@ -172,13 +194,11 @@ module.exports = (io, socket, vipRooms) => {
     if (!info) return;
 
     const { table } = info;
-
     if (table.currentTurnPlayerId !== String(userId)) return;
 
     if (table.deck.length === 0) return;
 
     const tile = table.deck.shift();
-
     table.hands[userId].push(tile);
 
     io.to(tableId).emit("game:tile_drawn", {
@@ -189,7 +209,7 @@ module.exports = (io, socket, vipRooms) => {
   });
 
   // ---------------------------------------------------------
-  // TAŞ ATMA
+  // TAŞ AT
   // ---------------------------------------------------------
   socket.on("game:discard_tile", ({ tableId, tile, userId }) => {
     const info = findTable(tableId);
@@ -208,7 +228,10 @@ module.exports = (io, socket, vipRooms) => {
 
     table.discardPile.push(tile);
 
-    const idx = table.players.findIndex(p => p.id.toString() === userId.toString());
+    const idx = table.players.findIndex(
+      p => p.id.toString() === userId.toString()
+    );
+
     const next = table.players[(idx + 1) % 4];
 
     table.currentTurnPlayerId = next.id.toString();
@@ -219,5 +242,41 @@ module.exports = (io, socket, vipRooms) => {
       userId,
       nextTurn: table.currentTurnPlayerId
     });
+  });
+
+  // ---------------------------------------------------------
+  // MASADAN AYRILMA
+  // ---------------------------------------------------------
+  socket.on("game:leave_table", ({ tableId, userId }) => {
+    const info = findTable(tableId);
+    if (!info) return;
+
+    const { table } = info;
+
+    table.players = table.players.filter(
+      p => p.id.toString() !== userId.toString()
+    );
+
+    delete table.ready[userId];
+    delete table.hands?.[userId];
+
+    socket.leave(tableId);
+
+    io.to(tableId).emit("game:player_left", {
+      tableId,
+      userId
+    });
+
+    io.to(tableId).emit("game:ready_changed", {
+      tableId,
+      ready: table.ready
+    });
+  });
+
+  // ---------------------------------------------------------
+  // SOKET KAPANDI
+  // ---------------------------------------------------------
+  socket.on("disconnect", () => {
+    console.log("Game socket disconnected:", socket.id);
   });
 };
