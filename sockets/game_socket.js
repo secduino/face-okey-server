@@ -353,5 +353,13 @@ module.exports = (io, socket, vipRooms) => {
   // ---------------------------------------------------------
   socket.on("disconnect", () => {
     console.log("❌ Game socket disconnected:", socket.id);
+    
+    // ✅ OYUNCUNUN TÜM TABLE ROOM'LARDAN AYRILMASINI SAĞLA
+    socket.rooms.forEach(roomId => {
+      if (roomId !== socket.id) {
+        socket.leave(roomId);
+        console.log("🚪 Socket left table room:", roomId);
+      }
+    });
   });
 };
