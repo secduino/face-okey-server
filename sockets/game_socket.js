@@ -97,6 +97,12 @@ module.exports = (io, socket, vipRooms) => {
 
     const { table } = info;
 
+    // ✅ OWNER AYARLA (ilk gelen)
+    if (!table.ownerId) {
+      table.ownerId = userId;
+      console.log("🔑 Owner belirlenmiştir:", table.ownerId);
+    }
+
     table.players = table.players || [];
     table.ready = table.ready || {};
 
