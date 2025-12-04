@@ -245,43 +245,24 @@ module.exports = (io, socket, vipRooms) => {
     dealTiles(table);
 
     console.log("🎮 OYUN BAŞLIYOR!");
-    console.log("   Oyuncular:", table.players.map(p => ({ id: p.id, socket: p.socketId })));
+    console.log("   Oyuncular:", table.players.map(p => p.id));
     console.log("   Gösterge:", table.indicator);
     console.log("   Okey:", table.okeyTile);
+    console.log("   Eller:", Object.keys(table.hands).map(pid => `${pid}: ${table.hands[pid].length} taş`));
 
-    // ✅ HER OYUNCUYA KENDİ ELİNİ GÖNDER
-    table.players.forEach((player) => {
-      const pid = player.id.toString();
-      
-      // ✅ Socket ID ile oyuncu bul
-      const playerSocketId = player.socketId;
-      
-      if (playerSocketId) {
-        console.log(`   📤 Oyuncu ${pid} için el gönderiliyor... (socket: ${playerSocketId})`);
-        
-        io.to(playerSocketId).emit("game:state_changed", {
-          hand: table.hands[pid],
-          currentTurnPlayerId: table.currentTurnPlayerId,
-          okey: table.okeyTile,
-          indicator: table.indicator,
-          deckCount: table.deck.length,
-          canDrawTile: table.canDrawTile[pid],
-          yourPlayerId: pid,
-          turn: table.turn
-        });
-      } else {
-        console.log(`   ⚠️ Oyuncu ${pid} için socket bulunamadı!`);
-      }
-    });
-
-    // ✅ HERKESE GENEL BİLGİ GÖNDER (LOOP DIŞINDA, SADECE 1 KEZ!)
+    // ✅ HERKESE TEK EVENT İLE TÜM BİLGİLERİ GÖNDER
+    // Frontend her oyuncu kendi ID'sine göre kendi elini alacak
     io.to(tableId).emit("game:started", {
+      hands: table.hands,  // TÜM OYUNCULARIN ELLERİ
       currentTurnPlayerId: table.currentTurnPlayerId,
       indicator: table.indicator,
-      deckCount: table.deck.length
+      okey: table.okeyTile,
+      deckCount: table.deck.length,
+      canDrawTile: table.canDrawTile,
+      turn: table.turn
     });
 
-    console.log("✅ OYUN BAŞLADI!");
+    console.log("✅ OYUN BAŞLADI! Event gönderildi: game:started");
   });
 
   socket.on("game:draw_tile", ({ tableId, userId }) => {
