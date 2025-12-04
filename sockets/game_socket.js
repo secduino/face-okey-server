@@ -87,8 +87,13 @@ module.exports = (io, socket, vipRooms) => {
   // MASAYA GİRİŞ
   // ---------------------------------------------------------
   socket.on("game:join_table", ({ tableId, userId }) => {
+    console.log("🎮 game:join_table -", { tableId, userId });
+
     const info = findTable(tableId);
-    if (!info) return;
+    if (!info) {
+      console.log("❌ Masa bulunamadı:", tableId);
+      return;
+    }
 
     const { table } = info;
 
@@ -108,7 +113,7 @@ module.exports = (io, socket, vipRooms) => {
     }
 
     // Yeni gelen hazır değil
-    table.ready[user.id] = false;
+    table.ready[user.id.toString()] = false;
 
     socket.join(tableId);
 
@@ -122,17 +127,27 @@ module.exports = (io, socket, vipRooms) => {
       tableId,
       ready: table.ready
     });
+
+    console.log("✅ Oyuncu masaya eklendi:", user.id, "Toplam:", table.players.length);
   });
 
   // ---------------------------------------------------------
   // HAZIR TOGGLE (Hazır ↔ Hazır Değil)
   // ---------------------------------------------------------
   socket.on("game:set_ready", ({ tableId, userId, ready }) => {
+    console.log("🎮 game:set_ready -", { tableId, userId, ready });
+
     const info = findTable(tableId);
-    if (!info) return;
+    if (!info) {
+      console.log("❌ Masa bulunamadı:", tableId);
+      return;
+    }
 
     const { table } = info;
-    table.ready[userId] = ready === true;
+    const uid = userId.toString();
+    table.ready[uid] = ready === true;
+
+    console.log("📊 Ready status:", table.ready);
 
     io.to(tableId).emit("game:ready_changed", {
       tableId,
@@ -144,41 +159,81 @@ module.exports = (io, socket, vipRooms) => {
   // BAŞLATMA (Sadece masa sahibi)
   // ---------------------------------------------------------
   socket.on("game:start", (payload) => {
-    const tableId =
-      typeof payload === "string"
-        ? payload
-        : payload.tableId || null;
+    console.log("🎮 game:start event geldi:", payload);
+
+    const tableId = payload?.tableId || null;
+    const userId = payload?.userId || null;
+
+    console.log("🔍 tableId:", tableId, "userId:", userId);
+
+    if (!tableId) {
+      console.log("❌ tableId yok!");
+      socket.emit("game:error", { message: "tableId gerekli" });
+      return;
+    }
 
     const info = findTable(tableId);
-    if (!info) return;
+    if (!info) {
+      console.log("❌ Masa bulunamadı:", tableId);
+      socket.emit("game:error", { message: "Masa bulunamadı" });
+      return;
+    }
 
     const { table } = info;
 
+    console.log("📋 Masa bilgisi:", {
+      ownerId: table.ownerId,
+      userId: userId,
+      playersCount: table.players.length,
+      ready: table.ready
+    });
+
+    // Owner kontrolü (string olarak karşılaştır)
     if (!table.ownerId) {
-      socket.emit("game:error", { message: "ownerId yok." });
+      console.log("❌ Masa sahibi yok");
+      socket.emit("game:error", { message: "Masa sahibi yok" });
       return;
     }
 
-    if (table.ownerId.toString() !== payload.userId.toString()) {
-      socket.emit("game:error", { message: "Sadece masa sahibi başlatabilir." });
+    if (table.ownerId.toString() !== userId.toString()) {
+      console.log(
+        "❌ Sadece owner başlatabilir. Owner:",
+        table.ownerId,
+        "Requesting:",
+        userId
+      );
+      socket.emit("game:error", {
+        message: "Sadece masa sahibi başlatabilir"
+      });
       return;
     }
 
+    // 4 oyuncu kontrolü
     if (table.players.length !== 4) {
-      socket.emit("game:error", { message: "Oyun 4 kişi olmadan başlayamaz." });
+      console.log("❌ 4 oyuncu yok. Mevcut:", table.players.length);
+      socket.emit("game:error", { message: "Oyun 4 kişi olmadan başlayamaz" });
       return;
     }
 
-    // Herkes hazır mı?
-    const allReady = Object.values(table.ready).every(v => v === true);
+    // Herkesi hazır kontrol
+    const allReady = table.players.every(p => {
+      const uid = p.id.toString();
+      const isReady = table.ready[uid] === true;
+      console.log(`  - ${p.name} (${uid}): ${isReady ? "✅" : "❌"}`);
+      return isReady;
+    });
+
     if (!allReady) {
-      socket.emit("game:error", { message: "Tüm oyuncular hazır değil." });
+      console.log("❌ Tüm oyuncular hazır değil");
+      socket.emit("game:error", { message: "Tüm oyuncular hazır değil" });
       return;
     }
 
-    // Dağıt
+    // Oyun başlat
+    console.log("✅ OYUN BAŞLATILIYOR...");
     dealTiles(table);
 
+    console.log("📤 game:state_changed event gönderiliyor");
     io.to(tableId).emit("game:state_changed", {
       hands: table.hands,
       currentTurnPlayerId: table.currentTurnPlayerId,
@@ -190,16 +245,26 @@ module.exports = (io, socket, vipRooms) => {
   // TAŞ ÇEK
   // ---------------------------------------------------------
   socket.on("game:draw_tile", ({ tableId, userId }) => {
+    console.log("🎮 game:draw_tile -", { tableId, userId });
+
     const info = findTable(tableId);
     if (!info) return;
 
     const { table } = info;
-    if (table.currentTurnPlayerId !== String(userId)) return;
+    if (table.currentTurnPlayerId !== String(userId)) {
+      console.log("❌ Sıra bu oyuncuya ait değil");
+      return;
+    }
 
-    if (table.deck.length === 0) return;
+    if (table.deck.length === 0) {
+      console.log("❌ Deste boş");
+      return;
+    }
 
     const tile = table.deck.shift();
     table.hands[userId].push(tile);
+
+    console.log("✅ Taş çekildi:", tile);
 
     io.to(tableId).emit("game:tile_drawn", {
       tableId,
@@ -212,6 +277,8 @@ module.exports = (io, socket, vipRooms) => {
   // TAŞ AT
   // ---------------------------------------------------------
   socket.on("game:discard_tile", ({ tableId, tile, userId }) => {
+    console.log("🎮 game:discard_tile -", { tableId, tile, userId });
+
     const info = findTable(tableId);
     if (!info) return;
 
@@ -233,8 +300,9 @@ module.exports = (io, socket, vipRooms) => {
     );
 
     const next = table.players[(idx + 1) % 4];
-
     table.currentTurnPlayerId = next.id.toString();
+
+    console.log("✅ Taş atıldı. Sıra:", next.name);
 
     io.to(tableId).emit("game:tile_discarded", {
       tableId,
@@ -245,9 +313,11 @@ module.exports = (io, socket, vipRooms) => {
   });
 
   // ---------------------------------------------------------
-  // MASADAN AYRILMA
+  // MASADAN AYRИЛMA
   // ---------------------------------------------------------
   socket.on("game:leave_table", ({ tableId, userId }) => {
+    console.log("🎮 game:leave_table -", { tableId, userId });
+
     const info = findTable(tableId);
     if (!info) return;
 
@@ -271,12 +341,14 @@ module.exports = (io, socket, vipRooms) => {
       tableId,
       ready: table.ready
     });
+
+    console.log("✅ Oyuncu masadan ayrıldı");
   });
 
   // ---------------------------------------------------------
   // SOKET KAPANDI
   // ---------------------------------------------------------
   socket.on("disconnect", () => {
-    console.log("Game socket disconnected:", socket.id);
+    console.log("❌ Game socket disconnected:", socket.id);
   });
 };
