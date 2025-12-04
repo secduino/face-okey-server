@@ -226,10 +226,13 @@ module.exports = (io, socket, vipRooms) => {
 
     console.log("✅ Masa oluşturuldu:", table.id, "Owner:", ownerId);
     
-    // ✅ TÜM ODAYA MASA LİSTESİNİ GÖNDER (OLUŞTURAN DAHİL!)
-    io.to(roomId).emit("vip:room_tables", room.tables);
+    // ✅ 1. OLUŞTURANA DOĞRUDAN GÖNDER
+    socket.emit("vip:room_tables", room.tables);
     
-    console.log("📤 vip:room_tables broadcast edildi, toplam masa:", room.tables.length);
+    // ✅ 2. TÜM ODAYA BROADCAST ET
+    socket.to(roomId).emit("vip:room_tables", room.tables);
+    
+    console.log("📤 vip:room_tables gönderildi (direct + broadcast), toplam masa:", room.tables.length);
   });
 
   // ---------------------------------------------------------
