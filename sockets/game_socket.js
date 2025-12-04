@@ -3,13 +3,24 @@
 module.exports = (io, socket, vipRooms) => {
 
   // ---------------------------------------------------------
-  // MASAYI BUL
+  // MASAYI BUL - VİP ROOMS'TA ARA
   // ---------------------------------------------------------
   function findTable(tableId) {
+    console.log("🔍 findTable aramaya başlıyor:", tableId);
+    
     for (const room of vipRooms) {
       if (!room.tables) continue;
+      
       const table = room.tables.find(t => t.id === tableId);
-      if (table) return { room, table };
+      if (table) {
+        console.log("✅ Masa bulundu! Room:", room.id);
+        return { room, table };
+      }
+    }
+    
+    console.log("❌ Masa bulunamadı! vipRooms sayısı:", vipRooms.length);
+    if (vipRooms.length > 0) {
+      console.log("   Toplam masalar:", vipRooms[0].tables?.length || 0);
     }
     return null;
   }
