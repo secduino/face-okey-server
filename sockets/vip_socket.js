@@ -225,11 +225,11 @@ module.exports = (io, socket, vipRooms) => {
     room.tables.push(table);
 
     console.log("✅ Masa oluşturuldu:", table.id, "Owner:", ownerId);
-
-    socket.emit("vip:table_created", table);
     
-    // TÜM ODAYA MASA LİSTESİNİ GÖNDER (ÖNEMLI!)
+    // ✅ TÜM ODAYA MASA LİSTESİNİ GÖNDER (OLUŞTURAN DAHİL!)
     io.to(roomId).emit("vip:room_tables", room.tables);
+    
+    console.log("📤 vip:room_tables broadcast edildi, toplam masa:", room.tables.length);
   });
 
   // ---------------------------------------------------------
@@ -257,7 +257,13 @@ module.exports = (io, socket, vipRooms) => {
 
     socket.join(tableId);
 
-    socket.emit("vip:table_joined", table);
+    // ✅ MASAYI OWNERİD İLE BİRLİKTE GÖNDER
+    socket.emit("vip:table_joined", {
+      ...table,
+      ownerId: table.ownerId // Explicitly include ownerId
+    });
+    
+    console.log("📤 vip:table_joined gönderildi, ownerId:", table.ownerId);
     
     // TÜM ODAYA MASA LİSTESİNİ GÖNDER
     io.to(roomId).emit("vip:room_tables", room.tables);
@@ -290,5 +296,13 @@ module.exports = (io, socket, vipRooms) => {
   // ---------------------------------------------------------
   socket.on("disconnect", () => {
     console.log("❌ VIP socket disconnected:", socket.id);
+    
+    // ✅ OYUNCUNUN TÜM ROOM'LARDAN VE MASALARDAN AYRILMASINI SAĞLA
+    socket.rooms.forEach(roomId => {
+      if (roomId !== socket.id) {
+        socket.leave(roomId);
+        console.log("🚪 Socket left room:", roomId);
+      }
+    });
   });
 };
