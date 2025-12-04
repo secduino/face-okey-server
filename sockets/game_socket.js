@@ -3,24 +3,13 @@
 module.exports = (io, socket, vipRooms) => {
 
   // ---------------------------------------------------------
-  // MASAYI BUL - VİP ROOMS'TA ARA
+  // MASAYI BUL
   // ---------------------------------------------------------
   function findTable(tableId) {
-    console.log("🔍 findTable aramaya başlıyor:", tableId);
-    
     for (const room of vipRooms) {
       if (!room.tables) continue;
-      
       const table = room.tables.find(t => t.id === tableId);
-      if (table) {
-        console.log("✅ Masa bulundu! Room:", room.id);
-        return { room, table };
-      }
-    }
-    
-    console.log("❌ Masa bulunamadı! vipRooms sayısı:", vipRooms.length);
-    if (vipRooms.length > 0) {
-      console.log("   Toplam masalar:", vipRooms[0].tables?.length || 0);
+      if (table) return { room, table };
     }
     return null;
   }
@@ -31,18 +20,14 @@ module.exports = (io, socket, vipRooms) => {
   function createTileDeck() {
     const deck = [];
     const colors = ["blue", "black", "red", "green"];
-
+    
     for (const color of colors) {
       for (let number = 1; number <= 13; number++) {
         deck.push({ color, number, fakeJoker: false });
         deck.push({ color, number, fakeJoker: false });
       }
     }
-
-    // Jokerler
-    deck.push({ color: "joker", number: 0, fakeJoker: false });
-    deck.push({ color: "joker", number: 0, fakeJoker: false });
-
+    
     return deck;
   }
 
@@ -53,21 +38,44 @@ module.exports = (io, socket, vipRooms) => {
     }
   }
 
-  function pickOkey(deck) {
-    const idx = deck.findIndex(t => t.color !== "joker");
-    if (idx === -1) return { deck, okeyTile: null };
-
-    const indicator = deck[idx];
-    const next = indicator.number === 13 ? 1 : indicator.number + 1;
-
+  // ✅ REFERANSA GÖRE: Gösterge Taşı Seç
+  function pickIndicatorAndOkey(deck) {
+    shuffle(deck);
+    
+    // İlk taş gösterge taşı
+    const indicator = deck[0];
+    deck.splice(0, 1);
+    
+    // Okey = Gösterge + 1
+    let okeyNumber = indicator.number + 1;
+    if (okeyNumber > 13) okeyNumber = 1;
+    
     const okeyTile = {
       color: indicator.color,
-      number: next,
-      fakeJoker: false
+      number: okeyNumber,
+      fakeJoker: false,
+      isOkey: true
     };
-
-    deck.splice(idx, 1);
-    return { deck, okeyTile };
+    
+    // ✅ 2 SAHTE OKEY EKLE (Referanstaki gibi)
+    const fakeOkey1 = {
+      color: okeyTile.color,
+      number: okeyTile.number,
+      fakeJoker: true
+    };
+    
+    const fakeOkey2 = {
+      color: okeyTile.color,
+      number: okeyTile.number,
+      fakeJoker: true
+    };
+    
+    deck.push(fakeOkey1);
+    deck.push(fakeOkey2);
+    
+    shuffle(deck); // Son karıştırma
+    
+    return { deck, okeyTile, indicator };
   }
 
   // ---------------------------------------------------------
@@ -75,27 +83,60 @@ module.exports = (io, socket, vipRooms) => {
   // ---------------------------------------------------------
   function dealTiles(table) {
     let deck = createTileDeck();
-    shuffle(deck);
-
-    const pick = pickOkey(deck);
-    deck = pick.deck;
-    table.okeyTile = pick.okeyTile;
-
-    table.deck = deck;
+    
+    const { deck: finalDeck, okeyTile, indicator } = pickIndicatorAndOkey(deck);
+    
+    table.deck = finalDeck;
+    table.okeyTile = okeyTile;
+    table.indicator = indicator;
     table.discardPile = [];
     table.hands = {};
+    table.drawnThisTurn = false;
 
     const players = table.players.map(p => p.id.toString());
     table.currentTurnPlayerId = players[0];
 
+    // ✅ İlk oyuncu 15, diğerleri 14 taş
     players.forEach((pid, index) => {
       const take = index === 0 ? 15 : 14;
-      table.hands[pid] = deck.splice(0, take);
+      table.hands[pid] = finalDeck.splice(0, take);
+      
+      // Taşları sırala (sayıya göre)
+      table.hands[pid].sort((a, b) => {
+        if (a.color === b.color) {
+          return a.number - b.number;
+        }
+        return a.color.localeCompare(b.color);
+      });
     });
+
+    console.log("✅ Taşlar dağıtıldı!");
+    console.log("   Gösterge:", indicator);
+    console.log("   Okey:", okeyTile);
+    console.log("   Destede kalan:", finalDeck.length);
   }
 
   // ---------------------------------------------------------
-  // MASAYA GİRİŞ - OWNER AYARLA
+  // OYUN BİTİŞ KONTROLÜ
+  // ---------------------------------------------------------
+  function checkGameEnd(table, userId) {
+    const hand = table.hands[userId];
+    
+    // El bitti mi?
+    if (hand.length === 0) {
+      return { finished: true, winnerId: userId };
+    }
+
+    // Deste bitti mi?
+    if (table.deck.length === 0) {
+      return { finished: true, winnerId: null };
+    }
+
+    return { finished: false };
+  }
+
+  // ---------------------------------------------------------
+  // MASAYA GİRİŞ
   // ---------------------------------------------------------
   socket.on("game:join_table", ({ tableId, userId }) => {
     console.log("🎮 game:join_table -", { tableId, userId });
@@ -108,10 +149,8 @@ module.exports = (io, socket, vipRooms) => {
 
     const { table } = info;
 
-    // ✅ OWNER AYARLA (ilk gelen)
     if (!table.ownerId) {
       table.ownerId = userId;
-      console.log("🔑 Owner belirlenmiştir:", table.ownerId);
     }
 
     table.players = table.players || [];
@@ -129,44 +168,34 @@ module.exports = (io, socket, vipRooms) => {
       table.players.push(user);
     }
 
-    // Yeni gelen hazır değil
     table.ready[user.id.toString()] = false;
 
     socket.join(tableId);
 
-    // ✅ TÜM MASAYA OYUNCU EKLENDÄ°Nİ BİLDİR
     io.to(tableId).emit("game:player_joined", {
       tableId,
       user
     });
 
-    // ✅ TÜM MASAYA HAZIR DURUMUNU GÖNDER
     io.to(tableId).emit("game:ready_changed", {
       tableId,
       ready: table.ready
     });
 
-    console.log("✅ Oyuncu masaya eklendi:", user.id, "Toplam:", table.players.length);
+    console.log("✅ Oyuncu masaya eklendi:", user.id);
   });
 
   // ---------------------------------------------------------
-  // HAZIR TOGGLE (Hazır ↔ Hazır Değil)
+  // HAZIR TOGGLE
   // ---------------------------------------------------------
   socket.on("game:set_ready", ({ tableId, userId, ready }) => {
-    console.log("🎮 game:set_ready -", { tableId, userId, ready });
-
     const info = findTable(tableId);
-    if (!info) {
-      console.log("❌ Masa bulunamadı:", tableId);
-      return;
-    }
+    if (!info) return;
 
     const { table } = info;
     const uid = userId.toString();
     table.ready[uid] = ready === true;
 
-    console.log("📊 Ready status:", table.ready);
-
     io.to(tableId).emit("game:ready_changed", {
       tableId,
       ready: table.ready
@@ -174,105 +203,100 @@ module.exports = (io, socket, vipRooms) => {
   });
 
   // ---------------------------------------------------------
-  // BAŞLATMA - HERKES BAŞLATABILIR (Herkesi hazır ise)
+  // OYUN BAŞLAT
   // ---------------------------------------------------------
   socket.on("game:start", (payload) => {
-    console.log("🎮 game:start event geldi:", payload);
-
     const tableId = payload?.tableId || null;
-    const userId = payload?.userId || null;
-
-    console.log("🔍 tableId:", tableId, "userId:", userId);
-
+    
     if (!tableId) {
-      console.log("❌ tableId yok!");
       socket.emit("game:error", { message: "tableId gerekli" });
       return;
     }
 
     const info = findTable(tableId);
     if (!info) {
-      console.log("❌ Masa bulunamadı:", tableId);
       socket.emit("game:error", { message: "Masa bulunamadı" });
       return;
     }
 
     const { table } = info;
 
-    console.log("📋 Masa bilgisi:", {
-      ownerId: table.ownerId,
-      userId: userId,
-      playersCount: table.players.length,
-      ready: table.ready
-    });
-
-    // 4 oyuncu kontrolü
     if (table.players.length !== 4) {
-      console.log("❌ 4 oyuncu yok. Mevcut:", table.players.length);
-      socket.emit("game:error", { message: "Oyun 4 kişi olmadan başlayamaz" });
+      socket.emit("game:error", { message: "4 kişi olmalı" });
       return;
     }
 
-    // Herkesi hazır kontrol
-    console.log("🔍 Oyuncuların hazır durumu:");
     const allReady = table.players.every(p => {
-      const uid = p.id.toString();
-      const isReady = table.ready[uid] === true;
-      console.log(`  - ${p.name} (${uid}): ${isReady ? "✅" : "❌"}`);
-      return isReady;
+      return table.ready[p.id.toString()] === true;
     });
 
     if (!allReady) {
-      console.log("❌ Tüm oyuncular hazır değil");
       socket.emit("game:error", { message: "Tüm oyuncular hazır değil" });
       return;
     }
 
-    // ✅ OYUN BAŞLAT!
-    console.log("✅ OYUN BAŞLATILIYOR...");
     dealTiles(table);
-
-    console.log("📤 game:state_changed event gönderiliyor");
-    console.log("   hands:", Object.keys(table.hands).length, "oyuncu");
-    console.log("   okey:", table.okeyTile);
-    console.log("   currentTurnPlayerId:", table.currentTurnPlayerId);
 
     io.to(tableId).emit("game:state_changed", {
       hands: table.hands,
       currentTurnPlayerId: table.currentTurnPlayerId,
-      okey: table.okeyTile
+      okey: table.okeyTile,
+      indicator: table.indicator,
+      deckCount: table.deck.length
     });
+
+    console.log("✅ OYUN BAŞLADI!");
   });
 
   // ---------------------------------------------------------
   // TAŞ ÇEK
   // ---------------------------------------------------------
   socket.on("game:draw_tile", ({ tableId, userId }) => {
-    console.log("🎮 game:draw_tile -", { tableId, userId });
-
     const info = findTable(tableId);
     if (!info) return;
 
     const { table } = info;
+
+    // Sıra kontrolü
     if (table.currentTurnPlayerId !== String(userId)) {
-      console.log("❌ Sıra bu oyuncuya ait değil");
+      socket.emit("game:error", { message: "Sıra sende değil" });
+      return;
+    }
+
+    // ✅ BU TURDA ZATEN TAŞ ÇEKİLDİ Mİ?
+    if (table.drawnThisTurn) {
+      socket.emit("game:error", { message: "Bu turda zaten taş çektin" });
       return;
     }
 
     if (table.deck.length === 0) {
-      console.log("❌ Deste boş");
+      socket.emit("game:error", { message: "Deste boş" });
+      
+      // Deste bitince oyun biter
+      io.to(tableId).emit("game:finished", {
+        winnerId: null,
+        reason: "Deste bitti"
+      });
       return;
     }
 
     const tile = table.deck.shift();
     table.hands[userId].push(tile);
+    table.drawnThisTurn = true;
 
     console.log("✅ Taş çekildi:", tile);
 
-    io.to(tableId).emit("game:tile_drawn", {
+    // Sadece çeken oyuncuya taşı gönder
+    socket.emit("game:tile_drawn", {
       tableId,
       userId,
-      tile
+      tile,
+      deckCount: table.deck.length
+    });
+
+    // Diğerlerine sadece deste sayısını gönder
+    socket.to(tableId).emit("game:deck_updated", {
+      deckCount: table.deck.length
     });
   });
 
@@ -280,32 +304,49 @@ module.exports = (io, socket, vipRooms) => {
   // TAŞ AT
   // ---------------------------------------------------------
   socket.on("game:discard_tile", ({ tableId, tile, userId }) => {
-    console.log("🎮 game:discard_tile -", { tableId, tile, userId });
-
     const info = findTable(tableId);
     if (!info) return;
 
     const { table } = info;
 
-    table.hands[userId] = table.hands[userId].filter(
+    // Sıra kontrolü
+    if (table.currentTurnPlayerId !== String(userId)) {
+      socket.emit("game:error", { message: "Sıra sende değil" });
+      return;
+    }
+
+    // ✅ TAŞ ÇEKMEDEN ATAMAZ
+    if (!table.drawnThisTurn) {
+      socket.emit("game:error", { message: "Önce taş çekmelisin" });
+      return;
+    }
+
+    // Elinden taşı kaldır
+    const hand = table.hands[userId];
+    const tileIndex = hand.findIndex(
       t =>
-        !(
-          t.number === tile.number &&
-          t.color === tile.color &&
-          !!t.fakeJoker === !!tile.fakeJoker
-        )
+        t.number === tile.number &&
+        t.color === tile.color &&
+        !!t.fakeJoker === !!tile.fakeJoker
     );
 
+    if (tileIndex === -1) {
+      socket.emit("game:error", { message: "Bu taş elde yok" });
+      return;
+    }
+
+    hand.splice(tileIndex, 1);
     table.discardPile.push(tile);
 
+    // ✅ SIRA DEĞİŞTİR
     const idx = table.players.findIndex(
       p => p.id.toString() === userId.toString()
     );
-
     const next = table.players[(idx + 1) % 4];
     table.currentTurnPlayerId = next.id.toString();
+    table.drawnThisTurn = false;
 
-    console.log("✅ Taş atıldı. Sıra:", next.name);
+    console.log("✅ Taş atıldı. Yeni sıra:", next.name || next.id);
 
     io.to(tableId).emit("game:tile_discarded", {
       tableId,
@@ -313,14 +354,24 @@ module.exports = (io, socket, vipRooms) => {
       userId,
       nextTurn: table.currentTurnPlayerId
     });
+
+    // ✅ OYUN BİTİŞ KONTROLÜ
+    const endCheck = checkGameEnd(table, userId);
+    if (endCheck.finished) {
+      io.to(tableId).emit("game:finished", {
+        winnerId: endCheck.winnerId,
+        scores: {},
+        reason: endCheck.winnerId ? "El bitti" : "Berabere"
+      });
+
+      console.log("🏆 OYUN BİTTİ! Kazanan:", endCheck.winnerId || "Berabere");
+    }
   });
 
   // ---------------------------------------------------------
   // MASADAN AYRИЛMA
   // ---------------------------------------------------------
   socket.on("game:leave_table", ({ tableId, userId }) => {
-    console.log("🎮 game:leave_table -", { tableId, userId });
-
     const info = findTable(tableId);
     if (!info) return;
 
@@ -345,20 +396,18 @@ module.exports = (io, socket, vipRooms) => {
       ready: table.ready
     });
 
-    console.log("✅ Oyuncu masadan ayrıldı");
+    console.log("✅ Oyuncu masadan ayrıldı:", userId);
   });
 
   // ---------------------------------------------------------
-  // SOKET KAPANDI
+  // DISCONNECT
   // ---------------------------------------------------------
   socket.on("disconnect", () => {
     console.log("❌ Game socket disconnected:", socket.id);
     
-    // ✅ OYUNCUNUN TÜM TABLE ROOM'LARDAN AYRILMASINI SAĞLA
     socket.rooms.forEach(roomId => {
       if (roomId !== socket.id) {
         socket.leave(roomId);
-        console.log("🚪 Socket left table room:", roomId);
       }
     });
   });
