@@ -173,7 +173,7 @@ module.exports = (io, socket, vipRooms) => {
   });
 
   // ---------------------------------------------------------
-  // BAŞLATMA (Sadece masa sahibi)
+  // BAŞLATMA - HERKES BAŞLATABILIR (Herkesi hazır ise)
   // ---------------------------------------------------------
   socket.on("game:start", (payload) => {
     console.log("🎮 game:start event geldi:", payload);
@@ -205,26 +205,6 @@ module.exports = (io, socket, vipRooms) => {
       ready: table.ready
     });
 
-    // Owner kontrolü (string olarak karşılaştır)
-    if (!table.ownerId) {
-      console.log("❌ Masa sahibi yok");
-      socket.emit("game:error", { message: "Masa sahibi yok" });
-      return;
-    }
-
-    if (table.ownerId.toString() !== userId.toString()) {
-      console.log(
-        "❌ Sadece owner başlatabilir. Owner:",
-        table.ownerId,
-        "Requesting:",
-        userId
-      );
-      socket.emit("game:error", {
-        message: "Sadece masa sahibi başlatabilir"
-      });
-      return;
-    }
-
     // 4 oyuncu kontrolü
     if (table.players.length !== 4) {
       console.log("❌ 4 oyuncu yok. Mevcut:", table.players.length);
@@ -233,6 +213,7 @@ module.exports = (io, socket, vipRooms) => {
     }
 
     // Herkesi hazır kontrol
+    console.log("🔍 Oyuncuların hazır durumu:");
     const allReady = table.players.every(p => {
       const uid = p.id.toString();
       const isReady = table.ready[uid] === true;
@@ -246,11 +227,15 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
-    // Oyun başlat
+    // ✅ OYUN BAŞLAT!
     console.log("✅ OYUN BAŞLATILIYOR...");
     dealTiles(table);
 
     console.log("📤 game:state_changed event gönderiliyor");
+    console.log("   hands:", Object.keys(table.hands).length, "oyuncu");
+    console.log("   okey:", table.okeyTile);
+    console.log("   currentTurnPlayerId:", table.currentTurnPlayerId);
+
     io.to(tableId).emit("game:state_changed", {
       hands: table.hands,
       currentTurnPlayerId: table.currentTurnPlayerId,
