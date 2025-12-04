@@ -59,6 +59,8 @@ module.exports = (io, socket, vipRooms) => {
     console.log("✅ VIP Oda oluşturuldu:", room.id, "Sahibi:", data.ownerId);
 
     socket.emit("vip:room_created", room);
+    
+    // TÜM CLIENTLARA ODA LİSTESİNİ GÖNDER
     io.emit("vip:rooms", vipRooms);
   });
 
@@ -105,6 +107,9 @@ module.exports = (io, socket, vipRooms) => {
 
     // Tüm odaya oyuncu listesi
     io.to(roomId).emit("vip:room_users", room.players);
+    
+    // Tüm odaya masa listesi
+    io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
   // ---------------------------------------------------------
@@ -222,6 +227,8 @@ module.exports = (io, socket, vipRooms) => {
     console.log("✅ Masa oluşturuldu:", table.id, "Owner:", ownerId);
 
     socket.emit("vip:table_created", table);
+    
+    // TÜM ODAYA MASA LİSTESİNİ GÖNDER (ÖNEMLI!)
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
@@ -251,6 +258,8 @@ module.exports = (io, socket, vipRooms) => {
     socket.join(tableId);
 
     socket.emit("vip:table_joined", table);
+    
+    // TÜM ODAYA MASA LİSTESİNİ GÖNDER
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
 
