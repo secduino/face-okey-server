@@ -95,7 +95,7 @@ module.exports = (io, socket, vipRooms) => {
   }
 
   // ---------------------------------------------------------
-  // MASAYA GİRİŞ
+  // MASAYA GİRİŞ - OWNER AYARLA
   // ---------------------------------------------------------
   socket.on("game:join_table", ({ tableId, userId }) => {
     console.log("🎮 game:join_table -", { tableId, userId });
@@ -134,12 +134,13 @@ module.exports = (io, socket, vipRooms) => {
 
     socket.join(tableId);
 
+    // ✅ TÜM MASAYA OYUNCU EKLENDÄ°Nİ BİLDİR
     io.to(tableId).emit("game:player_joined", {
       tableId,
       user
     });
 
-    // Hazır bilgilerini de yeni tüm clientlara gönder
+    // ✅ TÜM MASAYA HAZIR DURUMUNU GÖNDER
     io.to(tableId).emit("game:ready_changed", {
       tableId,
       ready: table.ready
