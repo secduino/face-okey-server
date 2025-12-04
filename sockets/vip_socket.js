@@ -6,7 +6,9 @@ module.exports = (io, socket, vipRooms) => {
   // UTIL FONKSİYONLARI
   // ---------------------------------------------------------
   function getRoom(roomId) {
-    return vipRooms.find(r => r.id === roomId);
+    const room = vipRooms.find(r => r.id === roomId);
+    console.log("🔍 getRoom:", roomId, room ? "✅ BULUNDU" : "❌ BULUNAMADI");
+    return room;
   }
 
   function isBanned(room, userId) {
@@ -14,7 +16,7 @@ module.exports = (io, socket, vipRooms) => {
     const ban = room.bans?.find(b => b.userId === userId);
     if (!ban) return false;
 
-    // Süresi bitmişse ban'ı kaldır
+    // Süresi bitmiş ise ban'ı kaldır
     if (ban.until && ban.until < now) {
       room.bans = room.bans.filter(b => b.userId !== userId);
       return false;
@@ -27,6 +29,8 @@ module.exports = (io, socket, vipRooms) => {
   // VIP ODA LİSTELEME
   // ---------------------------------------------------------
   socket.on("vip:list_rooms", () => {
+    console.log("📋 vip:list_rooms - Odalar gönderiliyor");
+    console.log("   Toplam oda sayısı:", vipRooms.length);
     socket.emit("vip:rooms", vipRooms);
   });
 
@@ -34,24 +38,25 @@ module.exports = (io, socket, vipRooms) => {
   // VIP ODA OLUŞTURMA
   // ---------------------------------------------------------
   socket.on("vip:create_room", (data) => {
+    console.log("🎮 vip:create_room event geldi:", data);
+
     const now = Date.now();
 
     const room = {
       id: "vip_" + now,
       name: data.name,
       ownerId: data.ownerId,
-
-      moderators: [],       // yetki verilen kişiler
-      bans: [],             // { userId, until }
-      chat: [],             // { id, userId, userName, msg, time }
-
-      expiresAt: now + (data.duration || 0), // PREMIUM SÜRE
-
+      moderators: [],
+      bans: [],
+      chat: [],
+      expiresAt: now + (data.duration || 0),
       players: [],
       tables: []
     };
 
     vipRooms.push(room);
+
+    console.log("✅ VIP Oda oluşturuldu:", room.id, "Sahibi:", data.ownerId);
 
     socket.emit("vip:room_created", room);
     io.emit("vip:rooms", vipRooms);
@@ -61,14 +66,18 @@ module.exports = (io, socket, vipRooms) => {
   // VIP ODAYA GİRİŞ
   // ---------------------------------------------------------
   socket.on("vip:join_room", ({ roomId, user }) => {
+    console.log("🎮 vip:join_room event geldi:", { roomId, userId: user.id });
+
     const room = getRoom(roomId);
     if (!room) {
+      console.log("❌ Oda bulunamadı:", roomId);
       socket.emit("vip:error", { message: "Oda bulunamadı" });
       return;
     }
 
     // Ban kontrol
     if (isBanned(room, user.id)) {
+      console.log("❌ Kullanıcı yasaklı:", user.id);
       socket.emit("vip:error", { message: "Bu odadan yasaklandın." });
       return;
     }
@@ -80,8 +89,9 @@ module.exports = (io, socket, vipRooms) => {
         name: user.name,
         avatar: user.avatar || "",
         isGuest: user.isGuest || false,
-        score: 1000,             // BAŞLANGIÇ PUANI
+        score: 1000
       });
+      console.log("✅ Oyuncu odaya eklendi:", user.id, "Toplam:", room.players.length);
     }
 
     socket.join(roomId);
@@ -111,15 +121,22 @@ module.exports = (io, socket, vipRooms) => {
   // MOD EKLEME / ÇIKARMA
   // ---------------------------------------------------------
   socket.on("vip:mod_toggle", ({ roomId, targetId, requesterId }) => {
+    console.log("🎮 vip:mod_toggle event geldi:", { roomId, targetId, requesterId });
+
     const room = getRoom(roomId);
     if (!room) return;
 
-    if (room.ownerId !== requesterId) return; // sadece owner mod verebilir
+    if (room.ownerId !== requesterId) {
+      console.log("❌ Sadece owner mod verebilir");
+      return;
+    }
 
     if (room.moderators.includes(targetId)) {
       room.moderators = room.moderators.filter(id => id !== targetId);
+      console.log("✅ Mod yetkisi kaldırıldı:", targetId);
     } else {
       room.moderators.push(targetId);
+      console.log("✅ Mod yetkisi verildi:", targetId);
     }
 
     io.to(roomId).emit("vip:room_users", room.players);
@@ -129,16 +146,21 @@ module.exports = (io, socket, vipRooms) => {
   // OYUNCU ATMA (OWNER / MOD)
   // ---------------------------------------------------------
   socket.on("vip:kick_player", ({ roomId, targetId, requesterId }) => {
+    console.log("🎮 vip:kick_player event geldi:", { roomId, targetId, requesterId });
+
     const room = getRoom(roomId);
     if (!room) return;
 
-    if (!hasPermission(room, requesterId)) return;
+    if (!hasPermission(room, requesterId)) {
+      console.log("❌ Yetkisi yok");
+      return;
+    }
 
     room.players = room.players.filter(p => p.id !== targetId);
 
-    io.to(roomId).emit("vip:room_users", room.players);
+    console.log("✅ Oyuncu atıldı:", targetId);
 
-    // Hedef oyuncu socket odadan çıkarılır
+    io.to(roomId).emit("vip:room_users", room.players);
     io.to(roomId).emit("vip:kicked", { userId: targetId });
   });
 
@@ -146,10 +168,15 @@ module.exports = (io, socket, vipRooms) => {
   // YASAKLAMA (BAN)
   // ---------------------------------------------------------
   socket.on("vip:ban_player", ({ roomId, targetId, requesterId, days }) => {
+    console.log("🎮 vip:ban_player event geldi:", { roomId, targetId, requesterId, days });
+
     const room = getRoom(roomId);
     if (!room) return;
 
-    if (!hasPermission(room, requesterId)) return;
+    if (!hasPermission(room, requesterId)) {
+      console.log("❌ Yetkisi yok");
+      return;
+    }
 
     const until = Date.now() + days * 24 * 60 * 60 * 1000;
 
@@ -160,6 +187,8 @@ module.exports = (io, socket, vipRooms) => {
 
     room.players = room.players.filter(p => p.id !== targetId);
 
+    console.log("✅ Oyuncu yasaklandı:", targetId, "Gün:", days);
+
     io.to(roomId).emit("vip:room_users", room.players);
     io.to(roomId).emit("vip:banned", { userId: targetId, until });
   });
@@ -168,8 +197,13 @@ module.exports = (io, socket, vipRooms) => {
   // VIP ODADA MASA OLUŞTURMA
   // ---------------------------------------------------------
   socket.on("vip:create_table", ({ roomId, ownerId }) => {
+    console.log("🎮 vip:create_table event geldi:", { roomId, ownerId });
+
     const room = getRoom(roomId);
-    if (!room) return;
+    if (!room) {
+      console.log("❌ Oda bulunamadı:", roomId);
+      return;
+    }
 
     const table = {
       id: "table_" + Date.now(),
@@ -179,10 +213,13 @@ module.exports = (io, socket, vipRooms) => {
       players: [],
       hands: {},
       deck: [],
-      currentTurnPlayerId: null
+      currentTurnPlayerId: null,
+      ready: {}
     };
 
     room.tables.push(table);
+
+    console.log("✅ Masa oluşturuldu:", table.id, "Owner:", ownerId);
 
     socket.emit("vip:table_created", table);
     io.to(roomId).emit("vip:room_tables", room.tables);
@@ -192,14 +229,23 @@ module.exports = (io, socket, vipRooms) => {
   // VIP MASAYA GİRİŞ
   // ---------------------------------------------------------
   socket.on("vip:join_table", ({ tableId, roomId, user }) => {
+    console.log("🎮 vip:join_table event geldi:", { tableId, roomId, userId: user.id });
+
     const room = getRoom(roomId);
-    if (!room) return;
+    if (!room) {
+      console.log("❌ Oda bulunamadı:", roomId);
+      return;
+    }
 
     const table = room.tables.find(t => t.id === tableId);
-    if (!table) return;
+    if (!table) {
+      console.log("❌ Masa bulunamadı:", tableId);
+      return;
+    }
 
     if (!table.players.find(p => p.id === user.id)) {
       table.players.push(user);
+      console.log("✅ Oyuncu masaya eklendi:", user.id, "Toplam:", table.players.length);
     }
 
     socket.join(tableId);
@@ -212,6 +258,8 @@ module.exports = (io, socket, vipRooms) => {
   // ODA İÇİ CHAT
   // ---------------------------------------------------------
   socket.on("vip:chat_message", ({ roomId, userId, userName, msg }) => {
+    console.log("💬 vip:chat_message:", { roomId, userId, msg: msg.substring(0, 30) });
+
     const room = getRoom(roomId);
     if (!room) return;
 
@@ -228,4 +276,10 @@ module.exports = (io, socket, vipRooms) => {
     io.to(roomId).emit("vip:chat_new_message", chatMsg);
   });
 
+  // ---------------------------------------------------------
+  // SOKET BAĞLANTISI KOPTU
+  // ---------------------------------------------------------
+  socket.on("disconnect", () => {
+    console.log("❌ VIP socket disconnected:", socket.id);
+  });
 };
