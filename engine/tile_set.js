@@ -1,27 +1,39 @@
 // /engine/tile_set.js
 
 // -------------------------------------------------------------
+// OKEY OYUNU TAŞ SETİ
+// 
+// KURALLAR:
+// - 106 taş toplam (104 normal + 2 sahte okey)
+// - 4 renk: Mavi, Kırmızı, Siyah, Yeşil
+// - Her renkte 1-13 arası sayılar, her taştan 2'şer adet
+// - 2 adet sahte okey (joker)
+// -------------------------------------------------------------
+
+const COLORS = ["blue", "red", "black", "green"];
+const MIN_NUMBER = 1;
+const MAX_NUMBER = 13;
+
+// -------------------------------------------------------------
 // 1) 106 TAŞ OLUŞTURMA
-// colors = blue, black, red, green
-// 1–13 arası iki set
-// +2 joker
 // -------------------------------------------------------------
 function createTileDeck() {
   const deck = [];
-  const colors = ["blue", "black", "red", "green"];
 
-  for (const color of colors) {
-    for (let n = 1; n <= 13; n++) {
+  // 4 renk x 13 sayı x 2 adet = 104 taş
+  for (const color of COLORS) {
+    for (let n = MIN_NUMBER; n <= MAX_NUMBER; n++) {
+      // Her taştan 2 adet (aynı renk, aynı sayı)
       deck.push({ color, number: n, fakeJoker: false });
       deck.push({ color, number: n, fakeJoker: false });
     }
   }
 
-  // gerçek jokerler (sahte okey değil)
-  deck.push({ color: "joker", number: 0, fakeJoker: false });
-  deck.push({ color: "joker", number: 0, fakeJoker: false });
+  // 2 adet sahte okey (joker)
+  deck.push({ color: "joker", number: 0, fakeJoker: true });
+  deck.push({ color: "joker", number: 0, fakeJoker: true });
 
-  return deck;
+  return deck; // Toplam: 106 taş
 }
 
 // -------------------------------------------------------------
@@ -36,48 +48,65 @@ function shuffle(deck) {
 
 // -------------------------------------------------------------
 // 3) Gösterge + Okey Belirleme
-// Gösterge = joker olmayan ilk taş
-// Okey = aynı renk + number+1  (13 → 1)
+// 
+// Gösterge = joker olmayan rastgele bir taş
+// Okey = göstergenin aynı renk + number+1 (13 ise → 1)
 // -------------------------------------------------------------
-function pickOkey(deck) {
+function pickIndicatorAndOkey(deck) {
+  // Joker olmayan bir taş bul
   const idx = deck.findIndex(t => t.color !== "joker");
   if (idx === -1) {
-    return { deck, indicator: null, okey: null };
+    return { deck, indicator: null, okeyTile: null };
   }
 
   const indicator = deck[idx];
 
-  // indicator taş desteden çıkarılır!
+  // Gösterge taşı desteden çıkarılır (toplam 1 taş kullanıldı)
   deck.splice(idx, 1);
 
-  const nextNum = indicator.number === 13 ? 1 : indicator.number + 1;
+  // Okey taşını belirle: göstergenin bir üstü
+  const okeyNumber = indicator.number === MAX_NUMBER ? MIN_NUMBER : indicator.number + 1;
 
-  const okey = {
+  const okeyTile = {
     color: indicator.color,
-    number: nextNum,
+    number: okeyNumber,
     fakeJoker: false
   };
 
-  return { deck, indicator, okey };
+  return { deck, indicator, okeyTile };
 }
 
 // -------------------------------------------------------------
 // ANA FONKSİYON → Deste hazır + karışmış + okey belirlenmiş
+// 
+// Dönüş:
+// - deck: 105 taş (gösterge çıkarıldı)
+// - indicator: gösterge taşı
+// - okeyTile: okey taşı bilgisi
 // -------------------------------------------------------------
 function generateFullSet() {
-  let deck = createTileDeck();
+  let deck = createTileDeck(); // 106 taş
   shuffle(deck);
 
-  const result = pickOkey(deck);
-  deck = result.deck;
+  const result = pickIndicatorAndOkey(deck);
+  deck = result.deck; // 105 taş kaldı
 
   return {
-    deck,                // karışmış deste
-    indicator: result.indicator, // gösterge taşı
-    okey: result.okey           // okey taşı
+    deck,
+    indicator: result.indicator,
+    okeyTile: result.okeyTile
   };
 }
 
+// -------------------------------------------------------------
+// SABÎTLER EXPORT
+// -------------------------------------------------------------
 module.exports = {
+  COLORS,
+  MIN_NUMBER,
+  MAX_NUMBER,
+  createTileDeck,
+  shuffle,
+  pickIndicatorAndOkey,
   generateFullSet
 };
