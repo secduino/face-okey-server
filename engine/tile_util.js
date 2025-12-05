@@ -1,42 +1,45 @@
 // /engine/tile_util.js
 
-//---------------------------------------------------------------------
-//  OKEY MOTORU TAŞ YARDIMCI FONKSİYONLARI
-//---------------------------------------------------------------------
-
+// -------------------------------------------------------------
+// OKEY MOTORU TAŞ YARDIMCI FONKSİYONLARI
+// -------------------------------------------------------------
+//
 // TAŞ OBJESİ FORMAT:
-// { color: "blue", number: 1, fakeJoker: false }
+// Normal taş: { color: "blue", number: 5, fakeJoker: false }
+// Sahte okey: { color: "joker", number: 0, fakeJoker: true }
 //
-// Gerçek jokerler:
-// { color: "joker", number: 0, fakeJoker: false }
-//
-// Sahte okey:
-// { ..., fakeJoker: true }
-//
-//---------------------------------------------------------------------
+// RENKLER: blue, red, black, green
+// SAYILAR: 1-13
+// -------------------------------------------------------------
 
-// Taşın "sıralama değeri"
-// Amaç: per / seri / set hesaplamasında sıralamayı kolaylaştırmak.
+const VALID_COLORS = ["blue", "red", "black", "green"];
+
+// -------------------------------------------------------------
+// Taşın sıralama değeri
+// -------------------------------------------------------------
 function tileSortValue(tile) {
-  if (tile.fakeJoker) return 9999;        // sahte okey en sona
-  if (tile.color === "joker") return 9998; // gerçek joker
-  return tile.number;                     // normal taşlar
+  if (tile.fakeJoker) return 9999;
+  if (tile.color === "joker") return 9998;
+  return tile.number;
 }
 
-// Basit sıralama (küçükten → büyüğe)
+// -------------------------------------------------------------
+// Taşları sırala (sayı → renk)
+// -------------------------------------------------------------
 function sortTiles(hand) {
+  const colorOrder = { blue: 0, red: 1, black: 2, green: 3, joker: 4 };
+  
   return hand.slice().sort((a, b) => {
     const av = tileSortValue(a);
     const bv = tileSortValue(b);
     if (av !== bv) return av - bv;
-
-    // aynı numarada ise renk sırası ver
-    const colorOrder = { blue: 0, black: 1, red: 2, green: 3, joker: 4 };
     return (colorOrder[a.color] || 0) - (colorOrder[b.color] || 0);
   });
 }
 
+// -------------------------------------------------------------
 // İki taş aynı mı?
+// -------------------------------------------------------------
 function sameTile(a, b) {
   if (!a || !b) return false;
   return (
@@ -46,102 +49,98 @@ function sameTile(a, b) {
   );
 }
 
-// Gerçek joker mi?
-function isRealJoker(tile) {
-  return tile.color === "joker" && tile.number === 0 && !tile.fakeJoker;
-}
-
-// Sahte okey mi?
+// -------------------------------------------------------------
+// Sahte okey mi? (joker taşları)
+// -------------------------------------------------------------
 function isFakeJoker(tile) {
   return tile.fakeJoker === true;
 }
 
-// NORMAL TAŞ MI?
-function isNormal(tile) {
-  return !isRealJoker(tile) && !isFakeJoker(tile);
+// -------------------------------------------------------------
+// Normal taş mı?
+// -------------------------------------------------------------
+function isNormalTile(tile) {
+  return !isFakeJoker(tile) && tile.color !== "joker";
 }
 
+// -------------------------------------------------------------
 // Renk geçerli mi?
-function validColor(color) {
-  return ["blue", "black", "red", "green"].includes(color);
+// -------------------------------------------------------------
+function isValidColor(color) {
+  return VALID_COLORS.includes(color);
 }
 
-//---------------------------------------------------------------------
-//  Serum: Taşı Okey gibi kullanalım (per hesaplama için)
-//
-//  ÖNEMLİ: Okey gerçek taş değildir. 
-//  Okey taşını kullanırken number/color LOJİKTE değişir.
-//---------------------------------------------------------------------
+// -------------------------------------------------------------
+// Taş okey mi? (okeyTile ile karşılaştır)
+// 
+// Bir taş okey sayılır eğer:
+// 1. Sahte okey (joker) ise
+// 2. Göstergenin bir üstü ise (aynı renk, number+1)
+// -------------------------------------------------------------
+function isOkeyTile(tile, okeyTile) {
+  if (isFakeJoker(tile)) return true;
+  
+  return (
+    tile.color === okeyTile.color &&
+    tile.number === okeyTile.number
+  );
+}
+
+// -------------------------------------------------------------
+// Taşı okey olarak uygula
+// 
+// Sahte okey veya gerçek okey taşı → joker gibi davranır
+// Normal taş → olduğu gibi döner
+// -------------------------------------------------------------
 function applyOkey(tile, okeyTile) {
   if (!tile) return null;
 
-  // Taş gerçek jokerdir => okey olarak davranır
-  if (isRealJoker(tile)) {
-    return {
-      color: okeyTile.color,
-      number: okeyTile.number,
-      fakeJoker: true
-    };
-  }
-
-  // Sahte okey zaten okey gibi davranır
+  // Sahte okey (joker) → wildcard olarak işaretlenir
   if (isFakeJoker(tile)) {
     return {
-      color: okeyTile.color,
-      number: okeyTile.number,
-      fakeJoker: true
+      ...tile,
+      isWildcard: true
     };
   }
 
-  // Normal taş → direkt döndür
+  // Gerçek okey taşı → wildcard olarak işaretlenir
+  if (isOkeyTile(tile, okeyTile)) {
+    return {
+      ...tile,
+      isWildcard: true
+    };
+  }
+
+  // Normal taş
   return tile;
 }
 
-//---------------------------------------------------------------------
-//  Ardışık mı? (seri taş kontrolü 1-2-3-4 gibi)
-//---------------------------------------------------------------------
-function isSequential(a, b, okeyTile = null) {
-  const t1 = okeyTile ? applyOkey(a, okeyTile) : a;
-  const t2 = okeyTile ? applyOkey(b, okeyTile) : b;
-
-  if (t1.color !== t2.color) return false;
-  if (!validColor(t1.color)) return false;
-
-  return t2.number === t1.number + 1 ||
-    (t1.number === 13 && t2.number === 1); // 13 → 1 wrap
+// -------------------------------------------------------------
+// Wildcard mı? (okey veya sahte okey)
+// -------------------------------------------------------------
+function isWildcard(tile, okeyTile) {
+  return isFakeJoker(tile) || isOkeyTile(tile, okeyTile);
 }
 
-//---------------------------------------------------------------------
-//  Aynı sayı farklı renk kontrolü (set = 7–7–7–7)
-//---------------------------------------------------------------------
-function isSameNumberDifferentColors(tiles, okeyTile = null) {
-  let baseNumber = null;
-  const usedColors = new Set();
-
-  for (const tile of tiles) {
-    let t = okeyTile ? applyOkey(tile, okeyTile) : tile;
-
-    if (isRealJoker(tile) || isFakeJoker(tile)) continue;
-
-    if (baseNumber === null) baseNumber = t.number;
-    if (t.number !== baseNumber) return false;
-
-    if (usedColors.has(t.color)) return false;
-    usedColors.add(t.color);
-  }
-
-  return true;
+// -------------------------------------------------------------
+// Taşın görüntü değeri (debug/log için)
+// -------------------------------------------------------------
+function tileToString(tile) {
+  if (isFakeJoker(tile)) return "JOKER";
+  return `${tile.color}-${tile.number}`;
 }
 
+// -------------------------------------------------------------
 module.exports = {
-  sortTiles,
+  VALID_COLORS,
   tileSortValue,
+  sortTiles,
   sameTile,
-  isNormal,
-  isRealJoker,
   isFakeJoker,
-  validColor,
+  isNormalTile,
+  isValidColor,
+  isOkeyTile,
   applyOkey,
-  isSequential,
-  isSameNumberDifferentColors
+  isWildcard,
+  tileToString
 };
