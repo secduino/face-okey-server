@@ -368,6 +368,9 @@ module.exports = (io, socket, vipRooms) => {
     const stateTable = getOrCreateTable(tableId);
     const uid = userId.toString();
 
+    console.log("🔄 Yeni el isteği:", uid, "masa:", tableId);
+    console.log("📊 Masa sahibi:", stateTable.ownerId);
+
     // Sadece masa sahibi yeni el başlatabilir
     if (stateTable.ownerId !== uid) {
       socket.emit("game:error", { message: "Sadece masa sahibi yeni el başlatabilir" });
@@ -382,28 +385,25 @@ module.exports = (io, socket, vipRooms) => {
     }
 
     console.log("🎮 YENİ EL BAŞLADI! Round:", stateTable.roundNumber);
+    console.log("📊 Gösterge:", result.indicator);
+    console.log("📊 Okey:", result.okeyTile);
     console.log("📊 Başlangıç oyuncusu:", result.startingPlayerId);
     console.log("📊 Deste:", result.deckSize, "taş");
 
-    // Her oyuncuya kendi elini gönder
-    for (const player of stateTable.players) {
-      const playerId = player.id.toString();
-      const playerSocket = [...io.sockets.sockets.values()].find(s => s.odUserId === playerId);
-      
-      if (playerSocket) {
-        playerSocket.emit("game:state_changed", {
-          tableId,
-          hand: stateTable.hands[playerId],
-          indicator: result.indicator,
-          okey: result.okeyTile,
-          currentTurnPlayerId: result.startingPlayerId,
-          deckCount: result.deckSize,
-          tableScores: result.tableScores,
-          roundNumber: stateTable.roundNumber,
-          gameStarted: true
-        });
-      }
-    }
+    // Tüm oyunculara gönder (ilk başlangıçla aynı format)
+    io.to(tableId).emit("game:state_changed", {
+      tableId,
+      hands: stateTable.hands,
+      currentTurnPlayerId: result.startingPlayerId,
+      indicator: result.indicator,
+      okey: result.okeyTile,
+      deckCount: result.deckSize,
+      tableScores: result.tableScores,
+      roundNumber: stateTable.roundNumber,
+      gameStarted: true
+    });
+
+    console.log("✅ Yeni el game:state_changed gönderildi");
   });
 
   // ═══════════════════════════════════════════════════════════
