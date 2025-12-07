@@ -231,5 +231,6 @@ module.exports = {
   isValidSet,
   isValidGroup,
   analyzeHand,
-  checkWinning
+  checkWinning,
+  calculateScore
 };
