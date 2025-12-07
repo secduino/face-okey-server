@@ -3,15 +3,11 @@
 // -------------------------------------------------------------
 // OKEY OYUN KURALLARI
 // 
-// SERİ (Run): Aynı renk, ardışık sayılar (min 3 taş)
+// SERİ (Run): Aynı renk, ardışık sayılar (min 3 taş, max 13)
 //   Örnek: Mavi 4-5-6-7
 //
 // PER (Set): Aynı sayı, farklı renkler (min 3, max 4 taş)
 //   Örnek: Kırmızı 7, Mavi 7, Siyah 7
-//
-// ÇİFT BİTİRME: Aynı renk, aynı sayı, 2 taş
-//   Örnek: Kırmızı 5, Kırmızı 5
-//   (Oyun boyunca hiç açmadan tek seferde bitirme)
 // -------------------------------------------------------------
 
 const {
@@ -31,7 +27,6 @@ const {
 function isValidRun(tiles, okeyTile) {
   if (tiles.length < 3) return false;
 
-  // Wildcardları ve normal taşları ayır
   const wildcards = tiles.filter(t => isWildcard(t, okeyTile));
   const normals = tiles.filter(t => !isWildcard(t, okeyTile));
 
@@ -48,18 +43,15 @@ function isValidRun(tiles, okeyTile) {
   // Sayılara göre sırala
   const sorted = normals.slice().sort((a, b) => a.number - b.number);
 
-  // Gap hesapla (eksik sayılar)
+  // Gap hesapla
   let totalGaps = 0;
   for (let i = 0; i < sorted.length - 1; i++) {
     const diff = sorted[i + 1].number - sorted[i].number;
-    
-    if (diff === 0) return false; // Aynı sayı olamaz seride
-    if (diff === 1) continue; // Ardışık, sorun yok
-    
-    totalGaps += (diff - 1); // Eksik sayı adedi
+    if (diff === 0) return false;
+    if (diff === 1) continue;
+    totalGaps += (diff - 1);
   }
 
-  // Wildcard sayısı gap'leri kapatmalı
   return wildcards.length >= totalGaps;
 }
 
@@ -75,20 +67,17 @@ function isValidSet(tiles, okeyTile) {
 
   if (normals.length === 0) return false;
 
-  // Tüm normal taşlar aynı sayıda olmalı
   const baseNumber = normals[0].number;
   for (const tile of normals) {
     if (tile.number !== baseNumber) return false;
   }
 
-  // Renkler çakışmamalı (her renk max 1 kez)
   const usedColors = new Set();
   for (const tile of normals) {
     if (usedColors.has(tile.color)) return false;
     usedColors.add(tile.color);
   }
 
-  // Wildcard ile birlikte max 4 renk olabilir
   const totalTiles = normals.length + wildcards.length;
   if (totalTiles > 4) return false;
 
@@ -96,71 +85,19 @@ function isValidSet(tiles, okeyTile) {
 }
 
 // -------------------------------------------------------------
-// GRUP GEÇERLİ Mİ? (Seri veya Per)
+// GRUP GEÇERLİ Mİ?
 // -------------------------------------------------------------
 function isValidGroup(tiles, okeyTile) {
   return isValidRun(tiles, okeyTile) || isValidSet(tiles, okeyTile);
 }
 
 // -------------------------------------------------------------
-// ÇİFT KONTROLÜ (Aynı renk, aynı sayı, 2 taş)
-// Çift bitirme için kullanılır
+// ÇİFT KONTROLÜ
 // -------------------------------------------------------------
 function isValidPair(tile1, tile2) {
   if (!tile1 || !tile2) return false;
-  
-  // İkisi de normal taş olmalı
   if (!isNormalTile(tile1) || !isNormalTile(tile2)) return false;
-  
-  // Aynı renk, aynı sayı
   return tile1.color === tile2.color && tile1.number === tile2.number;
-}
-
-// -------------------------------------------------------------
-// 14 TAŞLIK EL ANALİZİ
-// Tüm taşlar geçerli gruplar oluşturmalı
-// -------------------------------------------------------------
-function analyzeHand(tiles, okeyTile) {
-  if (tiles.length !== 14) {
-    return {
-      valid: false,
-      groups: [],
-      reason: `14 taş gerekli, ${tiles.length} taş var`
-    };
-  }
-
-  const sorted = sortTiles(tiles);
-
-  // Recursive olarak grupları bul
-  function findGroups(remaining, currentGroups) {
-    if (remaining.length === 0) {
-      return { valid: true, groups: currentGroups };
-    }
-
-    // 3 veya 4 taşlık grup dene
-    for (let size = 3; size <= Math.min(4, remaining.length); size++) {
-      // Tüm kombinasyonları dene
-      const combinations = getCombinations(remaining, size);
-      
-      for (const combo of combinations) {
-        if (isValidGroup(combo, okeyTile)) {
-          const rest = remaining.filter(t => !combo.includes(t));
-          const result = findGroups(rest, [...currentGroups, combo]);
-          if (result.valid) return result;
-        }
-      }
-    }
-
-    return { valid: false };
-  }
-
-  const result = findGroups(sorted, []);
-
-  return {
-    valid: result.valid,
-    groups: result.groups || [],
-    reason: result.valid ? "OK" : "Geçerli grup dizilimi bulunamadı"
-  };
 }
 
 // -------------------------------------------------------------
@@ -171,29 +108,81 @@ function getCombinations(arr, size) {
   if (arr.length < size) return [];
 
   const result = [];
-  
   for (let i = 0; i <= arr.length - size; i++) {
     const first = arr[i];
     const rest = arr.slice(i + 1);
     const subCombos = getCombinations(rest, size - 1);
-    
     for (const combo of subCombos) {
       result.push([first, ...combo]);
     }
   }
-
   return result;
 }
 
 // -------------------------------------------------------------
-// EL BİTTİ Mİ? (15 taş + 1 taş atma)
-// 
-// Oyuncu 15 taşla bitirmeli:
-// - 14 taş geçerli gruplar oluşturmalı
-// - 1 taş atılarak bitirilmeli
+// Taş karşılaştırma (index-based match için)
+// -------------------------------------------------------------
+function tileKey(t) {
+  return `${t.color}-${t.number}-${t.fakeJoker || false}`;
+}
+
+// -------------------------------------------------------------
+// 14 TAŞLIK EL ANALİZİ (Backtracking)
+// -------------------------------------------------------------
+function analyzeHand(tiles, okeyTile) {
+  if (tiles.length !== 14) {
+    return { valid: false, groups: [], reason: `14 taş gerekli, ${tiles.length} taş var` };
+  }
+
+  // Backtracking ile grupları bul
+  function backtrack(remaining, groups) {
+    if (remaining.length === 0) {
+      return { valid: true, groups: groups };
+    }
+    
+    if (remaining.length < 3) {
+      return { valid: false };
+    }
+
+    // 3, 4, 5... taşlık grupları dene
+    for (let size = 3; size <= remaining.length; size++) {
+      const combos = getCombinations(remaining, size);
+      
+      for (const combo of combos) {
+        if (isValidGroup(combo, okeyTile)) {
+          // Bu grubu kullan
+          const rest = remaining.filter(t => !combo.includes(t));
+          const result = backtrack(rest, [...groups, combo]);
+          if (result.valid) {
+            return result;
+          }
+        }
+      }
+    }
+    
+    return { valid: false };
+  }
+
+  const result = backtrack([...tiles], []);
+  
+  return {
+    valid: result.valid,
+    groups: result.groups || [],
+    reason: result.valid ? "OK" : "Geçerli grup dizilimi bulunamadı"
+  };
+}
+
+// -------------------------------------------------------------
+// EL BİTTİ Mİ? (15 taş)
 // -------------------------------------------------------------
 function checkWinning(hand, okeyTile) {
-  if (hand.length !== 15) return { won: false, reason: "15 taş gerekli" };
+  if (hand.length !== 15) {
+    console.log("❌ checkWinning: 15 taş gerekli, mevcut:", hand.length);
+    return { won: false, reason: "15 taş gerekli" };
+  }
+
+  console.log("🎯 checkWinning başladı");
+  console.log("El:", hand.map(t => tileToString(t)).join(', '));
 
   // Her taşı atarak dene
   for (let i = 0; i < hand.length; i++) {
@@ -203,6 +192,8 @@ function checkWinning(hand, okeyTile) {
     const result = analyzeHand(remaining, okeyTile);
     
     if (result.valid) {
+      console.log("✅ Kazandı! Atılan:", tileToString(discarded));
+      console.log("Gruplar:", result.groups.map(g => g.map(t => tileToString(t)).join('-')).join(' | '));
       return {
         won: true,
         discardedTile: discarded,
@@ -212,15 +203,12 @@ function checkWinning(hand, okeyTile) {
     }
   }
 
+  console.log("❌ Kazanamadı");
   return { won: false, reason: "Geçerli dizilim bulunamadı" };
 }
 
 // -------------------------------------------------------------
-// ÇİFT BİTİRME KONTROLÜ
-// 
-// Oyuncu hiç açmadan 7 çift ile bitirir:
-// - 14 taş = 7 çift
-// - Her çift: aynı renk, aynı sayı
+// ÇİFT BİTİRME KONTROLÜ (7 çift)
 // -------------------------------------------------------------
 function checkPairsWinning(hand, okeyTile) {
   if (hand.length !== 14) return { won: false, reason: "14 taş gerekli" };
@@ -228,7 +216,6 @@ function checkPairsWinning(hand, okeyTile) {
   const sorted = sortTiles(hand);
   const pairs = [];
 
-  // Her 2 taşı kontrol et
   for (let i = 0; i < sorted.length; i += 2) {
     if (i + 1 >= sorted.length) return { won: false, reason: "Tek taş kaldı" };
     
@@ -242,23 +229,14 @@ function checkPairsWinning(hand, okeyTile) {
     pairs.push([tile1, tile2]);
   }
 
-  return {
-    won: true,
-    pairs: pairs,
-    isPairsWin: true
-  };
+  return { won: true, pairs: pairs, isPairsWin: true };
 }
 
 // -------------------------------------------------------------
 // PUAN HESAPLAMA
-// 
-// Normal bitiş: 1 puan
-// Okey ile bitiş: 2 puan
-// Çift bitiş: 4 puan
 // -------------------------------------------------------------
 function calculateScore(winResult) {
   if (!winResult.won) return 0;
-
   if (winResult.isPairsWin) return 4;
   if (winResult.usedOkey) return 2;
   return 1;
