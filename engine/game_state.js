@@ -1,236 +1,230 @@
-// /engine/okey_logic.js
+// /engine/table_manager.js
 
 // -------------------------------------------------------------
-// OKEY OYUN MANTIĞI
+// MASA YÖNETİMİ
 // 
-// Bu dosya oyun akışını ve taş çekme/atma mantığını içerir.
+// VIP odalarındaki masaları yönetir.
+// Her masa 4 oyuncu alır.
 // -------------------------------------------------------------
 
 const {
-  isValidRun,
-  isValidSet,
-  isValidGroup,
-  analyzeHand,
-  checkWinning,
-  checkPairsWinning,
-  calculateScore
-} = require("./game_rules");
-
-const {
-  sameTile,
-  isFakeJoker,
-  isWildcard,
-  tileToString
-} = require("./tile_util");
+  tables,
+  getOrCreateTable,
+  resetTable,
+  dealTiles
+} = require("./game_state");
 
 // -------------------------------------------------------------
-// OYUNCU SIRASI HESAPLAMA
-// 
-// Her oyuncu sağındaki oyuncuya taş atar.
-// Sıra: 0 → 1 → 2 → 3 → 0 (saat yönünde)
+// MASA OLUŞTUR
 // -------------------------------------------------------------
-function getNextPlayerIndex(currentIndex, totalPlayers = 4) {
-  return (currentIndex + 1) % totalPlayers;
-}
+function createTable(room, tableId, ownerId) {
+  if (!room.tables) room.tables = [];
 
-// -------------------------------------------------------------
-// SOLDAKİ OYUNCUYU BUL (taş alma için)
-// 
-// Oyuncu solundaki oyuncunun attığı taşı alabilir.
-// -------------------------------------------------------------
-function getLeftPlayerIndex(currentIndex, totalPlayers = 4) {
-  return (currentIndex - 1 + totalPlayers) % totalPlayers;
-}
+  const exists = room.tables.find(t => t.id === tableId);
+  if (exists) return exists;
 
-// -------------------------------------------------------------
-// TAŞ ÇEKEBİLİR Mİ?
-// 
-// Oyuncu şu durumlarda taş çekebilir:
-// 1. Sırası gelmişse
-// 2. Elinde 14 taş varsa (15 taşa tamamlamak için)
-// -------------------------------------------------------------
-function canDrawTile(hand) {
-  return hand.length === 14;
-}
-
-// -------------------------------------------------------------
-// TAŞ ATABİLİR Mİ?
-// 
-// Oyuncu şu durumlarda taş atabilir:
-// 1. Sırası gelmişse
-// 2. Elinde 15 taş varsa
-// -------------------------------------------------------------
-function canDiscardTile(hand) {
-  return hand.length === 15;
-}
-
-// -------------------------------------------------------------
-// ORTADAN TAŞ ÇEK
-// 
-// Desteden (ortadaki kapalı taşlar) 1 taş çeker.
-// Deste boşsa null döner.
-// -------------------------------------------------------------
-function drawFromDeck(deck, hand) {
-  if (deck.length === 0) return { success: false, reason: "Deste boş" };
-  if (hand.length !== 14) return { success: false, reason: "El 14 taş olmalı" };
-
-  const tile = deck.shift();
-  hand.push(tile);
-
-  return { 
-    success: true, 
-    tile: tile,
-    deckRemaining: deck.length
+  const table = {
+    id: tableId,
+    ownerId: ownerId,
+    players: [],
+    ready: {},
+    createdAt: Date.now()
   };
+
+  room.tables.push(table);
+
+  // Global state'e de oluştur
+  const state = getOrCreateTable(tableId);
+  state.ownerId = ownerId;
+
+  return table;
 }
 
 // -------------------------------------------------------------
-// ATILAN TAŞI AL
+// MASA SİL
+// -------------------------------------------------------------
+function removeTable(room, tableId) {
+  if (!room.tables) return;
+
+  room.tables = room.tables.filter(t => t.id !== tableId);
+  tables.delete(tableId);
+}
+
+// -------------------------------------------------------------
+// MASA BUL
+// -------------------------------------------------------------
+function findTable(room, tableId) {
+  if (!room.tables) return null;
+  return room.tables.find(t => t.id === tableId) || null;
+}
+
+// -------------------------------------------------------------
+// MASADAKİ OYUNCULARI AL
+// -------------------------------------------------------------
+function getTablePlayers(table) {
+  return table.players || [];
+}
+
+// -------------------------------------------------------------
+// MASAYA OYUNCU EKLE
+// -------------------------------------------------------------
+function addPlayerToTable(room, tableId, user) {
+  const table = findTable(room, tableId);
+  if (!table) return null;
+
+  table.players = table.players || [];
+  table.ready = table.ready || {};
+
+  // Zaten varsa ekleme
+  const exists = table.players.find(p => p.id.toString() === user.id.toString());
+  if (exists) return table;
+
+  // Masa dolu mu? (4 kişi)
+  if (table.players.length >= 4) {
+    return null;
+  }
+
+  table.players.push({
+    id: user.id,
+    name: user.name || "Oyuncu",
+    avatar: user.avatar || "",
+    isGuest: user.isGuest ?? true
+  });
+
+  table.ready[user.id] = false;
+
+  // Global state'e yansıt
+  const state = getOrCreateTable(tableId);
+  state.players = table.players;
+  state.ready = table.ready;
+
+  return table;
+}
+
+// -------------------------------------------------------------
+// MASADAN OYUNCU ÇIKAR
+// -------------------------------------------------------------
+function removePlayerFromTable(room, tableId, userId) {
+  const table = findTable(room, tableId);
+  if (!table) return;
+
+  table.players = table.players.filter(
+    p => p.id.toString() !== userId.toString()
+  );
+
+  delete table.ready[userId];
+
+  // Global state'e yansıt
+  const state = getOrCreateTable(tableId);
+  state.players = table.players;
+  state.ready = table.ready;
+
+  // Masa boşsa reset
+  if (table.players.length === 0) {
+    resetTable(state);
+  }
+}
+
+// -------------------------------------------------------------
+// MASA SAHİBİ Mİ?
+// -------------------------------------------------------------
+function isTableOwner(table, userId) {
+  return table.ownerId && table.ownerId.toString() === userId.toString();
+}
+
+// -------------------------------------------------------------
+// MASA DOLU MU? (4 kişi)
+// -------------------------------------------------------------
+function isTableFull(table) {
+  return table.players && table.players.length === 4;
+}
+
+// -------------------------------------------------------------
+// OYUNCU HAZIR MI?
+// -------------------------------------------------------------
+function setPlayerReady(table, userId, isReady = true) {
+  if (!table.ready) table.ready = {};
+  table.ready[userId.toString()] = isReady;
+
+  // Global state'e yansıt
+  const state = getOrCreateTable(table.id);
+  state.ready = table.ready;
+}
+
+// -------------------------------------------------------------
+// TÜM OYUNCULAR HAZIR MI?
+// -------------------------------------------------------------
+function allPlayersReady(table) {
+  if (!table.players || !table.ready) return false;
+  if (table.players.length !== 4) return false;
+
+  for (const p of table.players) {
+    const pid = p.id.toString();
+    if (table.ready[pid] !== true) return false;
+  }
+
+  return true;
+}
+
+// -------------------------------------------------------------
+// OYUNU BAŞLAT
 // 
-// Soldaki oyuncunun attığı son taşı alır.
-// Sadece son atılan taş alınabilir.
+// Tüm oyuncular hazırsa taşları dağıt.
 // -------------------------------------------------------------
-function drawFromDiscard(discardPile, hand) {
-  if (discardPile.length === 0) return { success: false, reason: "Atık yığını boş" };
-  if (hand.length !== 14) return { success: false, reason: "El 14 taş olmalı" };
+function startGame(room, tableId) {
+  const table = findTable(room, tableId);
+  if (!table) return { success: false, reason: "Masa bulunamadı" };
 
-  const tile = discardPile.pop();
-  hand.push(tile);
-
-  return { 
-    success: true, 
-    tile: tile 
-  };
-}
-
-// -------------------------------------------------------------
-// TAŞ AT
-// 
-// Oyuncu elinden bir taş atar.
-// Atılan taş sağdaki oyuncunun alabileceği yere gider.
-// -------------------------------------------------------------
-function discardTile(hand, tile, discardPile) {
-  if (hand.length !== 15) return { success: false, reason: "El 15 taş olmalı" };
-
-  const index = hand.findIndex(t => sameTile(t, tile));
-  if (index === -1) return { success: false, reason: "Taş elde yok" };
-
-  const removed = hand.splice(index, 1)[0];
-  discardPile.push(removed);
-
-  return { 
-    success: true, 
-    discardedTile: removed,
-    handSize: hand.length
-  };
-}
-
-// -------------------------------------------------------------
-// OYUNU BİTİR
-// 
-// Oyuncu 15 taşla bitirmeye çalışır:
-// 1. 14 taş geçerli gruplar oluşturmalı
-// 2. 1 taş ortaya (deste yerine) bırakılır
-// -------------------------------------------------------------
-function finishGame(hand, okeyTile) {
-  if (hand.length !== 15) {
-    return { success: false, reason: "15 taş gerekli" };
+  if (!isTableFull(table)) {
+    return { success: false, reason: "4 oyuncu gerekli" };
   }
 
-  const result = checkWinning(hand, okeyTile);
-  
-  if (result.won) {
-    return {
-      success: true,
-      won: true,
-      discardedTile: result.discardedTile,
-      groups: result.groups,
-      usedOkey: result.usedOkey,
-      score: calculateScore(result)
-    };
+  if (!allPlayersReady(table)) {
+    return { success: false, reason: "Tüm oyuncular hazır değil" };
   }
 
-  return { success: false, won: false, reason: result.reason };
-}
+  const state = getOrCreateTable(tableId);
+  const result = dealTiles(state);
 
-// -------------------------------------------------------------
-// ÇİFT BİTİŞ KONTROLÜ
-// 
-// Oyuncu hiç açmadan 7 çift ile bitirir.
-// Bu özel bir bitiş türüdür ve daha yüksek puan verir.
-// -------------------------------------------------------------
-function finishWithPairs(hand, okeyTile) {
-  if (hand.length !== 14) {
-    return { success: false, reason: "14 taş gerekli" };
+  if (!result.success) {
+    return result;
   }
-
-  const result = checkPairsWinning(hand, okeyTile);
-  
-  if (result.won) {
-    return {
-      success: true,
-      won: true,
-      pairs: result.pairs,
-      isPairsWin: true,
-      score: calculateScore(result)
-    };
-  }
-
-  return { success: false, won: false, reason: result.reason };
-}
-
-// -------------------------------------------------------------
-// OYUN DURUMU KONTROLÜ
-// 
-// Oyun bitti mi?
-// - Deste boşsa ve kimse bitiremediyse: berabere
-// - Biri bitirdiyse: kazanan var
-// -------------------------------------------------------------
-function checkGameEnd(deck, winner) {
-  if (winner) {
-    return { ended: true, reason: "winner", winner: winner };
-  }
-
-  if (deck.length === 0) {
-    return { ended: true, reason: "draw", winner: null };
-  }
-
-  return { ended: false };
-}
-
-// -------------------------------------------------------------
-// EL DURUMU ÖZETİ (debug için)
-// -------------------------------------------------------------
-function getHandSummary(hand, okeyTile) {
-  const wildcards = hand.filter(t => isWildcard(t, okeyTile));
-  const normals = hand.filter(t => !isWildcard(t, okeyTile));
 
   return {
-    total: hand.length,
-    wildcards: wildcards.length,
-    normals: normals.length,
-    tiles: hand.map(t => tileToString(t))
+    success: true,
+    indicator: result.indicator,
+    okeyTile: result.okeyTile,
+    startingPlayerId: result.startingPlayerId,
+    deckSize: result.deckSize
   };
+}
+
+// -------------------------------------------------------------
+// OYUNCUNUN MASASINI BUL
+// -------------------------------------------------------------
+function findPlayerTable(room, userId) {
+  if (!room.tables) return null;
+
+  for (const table of room.tables) {
+    const found = table.players.find(p => p.id.toString() === userId.toString());
+    if (found) return table;
+  }
+
+  return null;
 }
 
 // -------------------------------------------------------------
 module.exports = {
-  getNextPlayerIndex,
-  getLeftPlayerIndex,
-  canDrawTile,
-  canDiscardTile,
-  drawFromDeck,
-  drawFromDiscard,
-  discardTile,
-  finishGame,
-  finishWithPairs,
-  checkGameEnd,
-  getHandSummary,
-  // Re-export for convenience
-  isValidRun,
-  isValidSet,
-  isValidGroup,
-  analyzeHand,
-  checkWinning,
-  calculateScore
+  createTable,
+  removeTable,
+  findTable,
+  getTablePlayers,
+  addPlayerToTable,
+  removePlayerFromTable,
+  isTableOwner,
+  isTableFull,
+  setPlayerReady,
+  allPlayersReady,
+  startGame,
+  findPlayerTable
 };
