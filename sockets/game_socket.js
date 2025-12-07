@@ -328,16 +328,69 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
-    console.log("🏆 OYUN BİTTİ! Kazanan:", uid, "Skor:", result.score);
+    console.log("🏆 EL BİTTİ! Kazanan:", result.winnerName);
+    console.log("📊 Puan değişimleri:", result.roundResult.scoreChanges);
+    console.log("📊 Güncel puanlar:", result.tableScores);
 
-    io.to(tableId).emit("game:finished", {
+    io.to(tableId).emit("game:round_finished", {
       tableId,
-      winnerId: uid,
-      score: result.score,
-      totalScore: result.totalScore,
+      winnerId: result.winnerId,
+      winnerName: result.winnerName,
+      
+      // El sonucu
+      roundResult: result.roundResult,
+      
+      // Güncel puanlar
+      tableScores: result.tableScores,
+      
+      // Oyun tamamen bitti mi?
+      gameOver: result.gameOver,
+      loser: result.loser,
+      loserName: result.loserName,
+      
+      // Bitiş detayları
       groups: result.groups,
       usedOkey: result.usedOkey,
-      reason: result.usedOkey ? "Okey ile bitirdi!" : "Oyunu bitirdi!"
+      discardedIsOkey: result.roundResult.discardedIsOkey,
+      
+      reason: result.roundResult.discardedIsOkey 
+        ? "Okey atarak bitirdi! (x4 puan)" 
+        : "Eli bitirdi!"
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // YENİ EL BAŞLAT
+  // ═══════════════════════════════════════════════════════════
+
+  socket.on("game:new_round", ({ tableId, userId }) => {
+    const stateTable = getTable(tableId);
+    const uid = userId.toString();
+
+    // Sadece masa sahibi yeni el başlatabilir
+    if (stateTable.ownerId !== uid) {
+      socket.emit("game:error", { message: "Sadece masa sahibi yeni el başlatabilir" });
+      return;
+    }
+
+    const result = require('./game_state').startNewRound(stateTable);
+
+    if (!result.success) {
+      socket.emit("game:error", { message: result.reason });
+      return;
+    }
+
+    console.log("🎮 YENİ EL BAŞLADI! Round:", stateTable.roundNumber);
+
+    io.to(tableId).emit("game:state_changed", {
+      tableId,
+      hands: stateTable.hands,
+      indicator: result.indicator,
+      okey: result.okeyTile,
+      currentTurnPlayerId: result.startingPlayerId,
+      deckCount: result.deckSize,
+      tableScores: result.tableScores,
+      roundNumber: stateTable.roundNumber
     });
   });
 
