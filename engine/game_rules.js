@@ -23,6 +23,7 @@ const {
 // -------------------------------------------------------------
 // SERİ KONTROLÜ (Run)
 // Aynı renk, ardışık sayılar, minimum 3 taş
+// Wildcard (okey/joker) herhangi bir taşın yerine geçebilir
 // -------------------------------------------------------------
 function isValidRun(tiles, okeyTile) {
   if (tiles.length < 3) return false;
@@ -30,6 +31,7 @@ function isValidRun(tiles, okeyTile) {
   const wildcards = tiles.filter(t => isWildcard(t, okeyTile));
   const normals = tiles.filter(t => !isWildcard(t, okeyTile));
 
+  // Tamamı wildcard olamaz (en az 1 normal taş olmalı)
   if (normals.length === 0) return false;
 
   // Tüm normal taşlar aynı renkte olmalı
@@ -41,18 +43,59 @@ function isValidRun(tiles, okeyTile) {
   if (!isValidColor(baseColor)) return false;
 
   // Sayılara göre sırala
-  const sorted = normals.slice().sort((a, b) => a.number - b.number);
-
-  // Gap hesapla
-  let totalGaps = 0;
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const diff = sorted[i + 1].number - sorted[i].number;
-    if (diff === 0) return false;
-    if (diff === 1) continue;
-    totalGaps += (diff - 1);
+  const numbers = normals.map(t => t.number).sort((a, b) => a - b);
+  
+  // Aynı sayı varsa geçersiz
+  for (let i = 0; i < numbers.length - 1; i++) {
+    if (numbers[i] === numbers[i + 1]) return false;
   }
 
-  return wildcards.length >= totalGaps;
+  // Toplam uzunluk = normal taşlar + wildcardlar
+  const totalLength = tiles.length;
+  
+  // Min ve max sayıları bul
+  const minNum = numbers[0];
+  const maxNum = numbers[numbers.length - 1];
+  
+  // Seri aralığı kontrolü (1-13 arası olmalı)
+  // Wildcard'larla birlikte seri oluşturulabilir mi?
+  
+  // En kısa olası seri: maxNum - minNum + 1
+  const minRequiredLength = maxNum - minNum + 1;
+  
+  // Eğer toplam taş sayısı minimum gerekenden azsa, wildcardlarla genişletebiliriz
+  // Ama seri 1'den küçük veya 13'ten büyük olamaz
+  
+  if (totalLength < minRequiredLength) {
+    // Yeterli taş yok
+    return false;
+  }
+  
+  if (totalLength === minRequiredLength) {
+    // Tam sığıyor, gap'leri wildcard doldurmalı
+    const gaps = minRequiredLength - numbers.length;
+    return wildcards.length >= gaps;
+  }
+  
+  // totalLength > minRequiredLength
+  // Seriyi sola veya sağa genişletebiliriz
+  const extraTiles = totalLength - minRequiredLength;
+  const gaps = minRequiredLength - numbers.length;
+  
+  // Gap'leri doldurmak için wildcard gerekiyor
+  // Kalan wildcardlar seriyi genişletir
+  if (wildcards.length < gaps) return false;
+  
+  const remainingWildcards = wildcards.length - gaps;
+  
+  // Seriyi genişletme: sola (minNum-1, minNum-2...) veya sağa (maxNum+1, maxNum+2...)
+  // Sınırlar: 1 ve 13
+  const canExpandLeft = minNum - 1; // Kaç adım sola gidilebilir (min 0)
+  const canExpandRight = 13 - maxNum; // Kaç adım sağa gidilebilir
+  
+  const totalExpansionPossible = canExpandLeft + canExpandRight;
+  
+  return remainingWildcards <= totalExpansionPossible;
 }
 
 // -------------------------------------------------------------
@@ -101,40 +144,14 @@ function isValidPair(tile1, tile2) {
 }
 
 // -------------------------------------------------------------
-// Kombinasyon yardımcı fonksiyonu
-// -------------------------------------------------------------
-function getCombinations(arr, size) {
-  if (size === 0) return [[]];
-  if (arr.length < size) return [];
-
-  const result = [];
-  for (let i = 0; i <= arr.length - size; i++) {
-    const first = arr[i];
-    const rest = arr.slice(i + 1);
-    const subCombos = getCombinations(rest, size - 1);
-    for (const combo of subCombos) {
-      result.push([first, ...combo]);
-    }
-  }
-  return result;
-}
-
-// -------------------------------------------------------------
-// Taş karşılaştırma (index-based match için)
-// -------------------------------------------------------------
-function tileKey(t) {
-  return `${t.color}-${t.number}-${t.fakeJoker || false}`;
-}
-
-// -------------------------------------------------------------
-// 14 TAŞLIK EL ANALİZİ (Backtracking)
+// 14 TAŞLIK EL ANALİZİ (Optimize Edilmiş)
 // -------------------------------------------------------------
 function analyzeHand(tiles, okeyTile) {
   if (tiles.length !== 14) {
     return { valid: false, groups: [], reason: `14 taş gerekli, ${tiles.length} taş var` };
   }
 
-  // Backtracking ile grupları bul
+  // Hızlı backtracking - küçük gruplardan başla
   function backtrack(remaining, groups) {
     if (remaining.length === 0) {
       return { valid: true, groups: groups };
@@ -144,15 +161,19 @@ function analyzeHand(tiles, okeyTile) {
       return { valid: false };
     }
 
+    // İlk taşı içeren grupları dene (dallanmayı azaltır)
+    const firstTile = remaining[0];
+    const rest = remaining.slice(1);
+    
     // 3, 4, 5... taşlık grupları dene
-    for (let size = 3; size <= remaining.length; size++) {
-      const combos = getCombinations(remaining, size);
+    for (let size = 3; size <= Math.min(13, remaining.length); size++) {
+      // İlk taşı içeren kombinasyonları bul
+      const combosWithFirst = getCombinationsWithFirst(remaining, size);
       
-      for (const combo of combos) {
+      for (const combo of combosWithFirst) {
         if (isValidGroup(combo, okeyTile)) {
-          // Bu grubu kullan
-          const rest = remaining.filter(t => !combo.includes(t));
-          const result = backtrack(rest, [...groups, combo]);
+          const newRemaining = removeFromArray(remaining, combo);
+          const result = backtrack(newRemaining, [...groups, combo]);
           if (result.valid) {
             return result;
           }
@@ -172,6 +193,52 @@ function analyzeHand(tiles, okeyTile) {
   };
 }
 
+// İlk elemanı içeren kombinasyonlar (daha az kombinasyon)
+function getCombinationsWithFirst(arr, size) {
+  if (size < 1 || arr.length < size) return [];
+  
+  const first = arr[0];
+  const rest = arr.slice(1);
+  
+  if (size === 1) return [[first]];
+  
+  const subCombos = getCombinations(rest, size - 1);
+  return subCombos.map(combo => [first, ...combo]);
+}
+
+// Standart kombinasyon
+function getCombinations(arr, size) {
+  if (size === 0) return [[]];
+  if (arr.length < size) return [];
+
+  const result = [];
+  for (let i = 0; i <= arr.length - size; i++) {
+    const first = arr[i];
+    const rest = arr.slice(i + 1);
+    const subCombos = getCombinations(rest, size - 1);
+    for (const combo of subCombos) {
+      result.push([first, ...combo]);
+    }
+  }
+  return result;
+}
+
+// Diziden elemanları çıkar
+function removeFromArray(arr, toRemove) {
+  const result = [...arr];
+  for (const item of toRemove) {
+    const idx = result.findIndex(t => 
+      t.color === item.color && 
+      t.number === item.number && 
+      !!t.fakeJoker === !!item.fakeJoker
+    );
+    if (idx !== -1) {
+      result.splice(idx, 1);
+    }
+  }
+  return result;
+}
+
 // -------------------------------------------------------------
 // EL BİTTİ Mİ? (15 taş)
 // -------------------------------------------------------------
@@ -183,6 +250,7 @@ function checkWinning(hand, okeyTile) {
 
   console.log("🎯 checkWinning başladı");
   console.log("El:", hand.map(t => tileToString(t)).join(', '));
+  console.log("Okey taşı:", tileToString(okeyTile));
 
   // Her taşı atarak dene
   for (let i = 0; i < hand.length; i++) {
@@ -193,7 +261,17 @@ function checkWinning(hand, okeyTile) {
     
     if (result.valid) {
       console.log("✅ Kazandı! Atılan:", tileToString(discarded));
-      console.log("Gruplar:", result.groups.map(g => g.map(t => tileToString(t)).join('-')).join(' | '));
+      
+      // Grupları doğrula ve logla
+      console.log("Gruplar:");
+      for (let g = 0; g < result.groups.length; g++) {
+        const group = result.groups[g];
+        const groupStr = group.map(t => tileToString(t)).join('-');
+        const isRun = isValidRun(group, okeyTile);
+        const isSet = isValidSet(group, okeyTile);
+        console.log(`  Grup ${g + 1}: ${groupStr} (Run: ${isRun}, Set: ${isSet})`);
+      }
+      
       return {
         won: true,
         discardedTile: discarded,
