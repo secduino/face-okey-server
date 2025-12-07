@@ -3,31 +3,30 @@
 // -------------------------------------------------------------
 // OKEY OYUN DURUMU YÖNETİMİ
 // 
-// TAŞ DAĞILIMI:
-// - Toplam: 106 taş
-// - Gösterge: 1 taş (okey belirlemek için)
-// - Başlangıç oyuncusu: 15 taş
-// - Diğer 3 oyuncu: 14'er taş (toplam 42)
-// - Ortadaki deste: 48 taş
-// 
-// TOPLAM: 1 + 15 + 42 + 48 = 106 ✓
+// PUANLAMA SİSTEMİ (Düşmeli):
+// - Başlangıç puanı: 5, 13 veya 20 (masa ayarı)
+// - Normal bitiş: Diğerlerinden 2 puan düşer
+// - Çift bitiş: Diğerlerinden 4 puan düşer
+// - Okey ile bitiş: Düşen puan x4
+// - 0'a düşen oyuncu oyunu kaybeder
 // -------------------------------------------------------------
 
 const { generateFullSet } = require("./tile_set");
-const { sameTile, sortTiles } = require("./tile_util");
+const { sameTile, sortTiles, isWildcard } = require("./tile_util");
 const { 
   getNextPlayerIndex,
   checkWinning,
+  checkPairsWinning,
   calculateScore 
 } = require("./okey_logic");
 
 // -------------------------------------------------------------
-// GLOBAL STATE → TÜM MASALAR
+// GLOBAL STATE
 // -------------------------------------------------------------
 const tables = new Map();
 
 // -------------------------------------------------------------
-// MASA BUL / OLUŞTUR
+// MASA OLUŞTUR
 // -------------------------------------------------------------
 function getOrCreateTable(tableId) {
   if (!tables.has(tableId)) {
@@ -36,44 +35,63 @@ function getOrCreateTable(tableId) {
   return tables.get(tableId);
 }
 
-// -------------------------------------------------------------
-// BOŞ MASA OLUŞTUR
-// -------------------------------------------------------------
 function createEmptyTable(tableId) {
   return {
     id: tableId,
     ownerId: null,
-    players: [],           // [{id, name, avatar, isGuest}]
-    ready: {},             // {odId: true/false}
+    players: [],
+    ready: {},
+    
+    // Masa ayarları
+    settings: {
+      startingPoints: 20,  // 5, 13, 20 seçenekleri
+      basePoints: 1000     // Genel puan (ranking için)
+    },
     
     // Oyun durumu
-    deck: [],              // Ortadaki kapalı taşlar
-    hands: {},             // {odId: [tiles]}
-    discardPiles: {},      // {odId: [tiles]} - her oyuncunun attığı taşlar
-    lastDiscarded: null,   // Son atılan taş
-    lastDiscardedBy: null, // Son taşı atan oyuncu
+    deck: [],
+    hands: {},
+    discardPiles: {},
+    lastDiscarded: null,
+    lastDiscardedBy: null,
     
-    indicator: null,       // Gösterge taşı
-    okeyTile: null,        // Okey taşı
+    indicator: null,
+    okeyTile: null,
     
     currentTurnPlayerId: null,
     currentTurnIndex: 0,
+    hasDrawn: false,
     
-    hasDrawn: false,       // Oyuncu taş çekti mi?
+    // Puanlama
+    tableScores: {},      // Masa içi puan (düşmeli sistem)
+    totalScores: {},      // Genel puan (1000 üzerinden)
     
-    scores: {},            // {odId: score}
     gameStarted: false,
     gameEnded: false,
     winner: null,
+    roundNumber: 1,
     
     createdAt: Date.now()
   };
 }
 
 // -------------------------------------------------------------
-// MASA SIFIRLAMA
+// MASA AYARLARINI GÜNCELLE
 // -------------------------------------------------------------
-function resetTable(table) {
+function updateTableSettings(table, settings) {
+  if (settings.startingPoints) {
+    const valid = [5, 13, 20];
+    if (valid.includes(settings.startingPoints)) {
+      table.settings.startingPoints = settings.startingPoints;
+    }
+  }
+  return table.settings;
+}
+
+// -------------------------------------------------------------
+// MASA SIFIRLAMA (Yeni el için)
+// -------------------------------------------------------------
+function resetTableForNewRound(table) {
   table.deck = [];
   table.hands = {};
   table.discardPiles = {};
@@ -91,12 +109,6 @@ function resetTable(table) {
 
 // -------------------------------------------------------------
 // TAŞ DAĞITIMI
-// 
-// 1. 106 taş oluştur ve karıştır
-// 2. Gösterge taşını seç (okey belirlenir)
-// 3. Rastgele bir oyuncu seç (15 taş alacak)
-// 4. Diğer oyunculara 14'er taş dağıt
-// 5. Kalan 48 taş ortada kalır
 // -------------------------------------------------------------
 function dealTiles(table) {
   const players = table.players.map(p => p.id.toString());
@@ -105,25 +117,22 @@ function dealTiles(table) {
     return { success: false, reason: "4 oyuncu gerekli" };
   }
 
-  // 1. Deste oluştur (106 taş, karışık, gösterge seçilmiş)
   const { deck, indicator, okeyTile } = generateFullSet();
   
-  // 2. Gösterge ve okey kaydet
   table.indicator = indicator;
   table.okeyTile = okeyTile;
   
-  // 3. Rastgele başlangıç oyuncusu seç
+  // Rastgele başlangıç oyuncusu
   const startingPlayerIndex = Math.floor(Math.random() * 4);
   const startingPlayerId = players[startingPlayerIndex];
   
   table.currentTurnIndex = startingPlayerIndex;
   table.currentTurnPlayerId = startingPlayerId;
   
-  // 4. Taşları dağıt
   table.hands = {};
   table.discardPiles = {};
   
-  let deckCopy = [...deck]; // 105 taş (gösterge çıkarılmış)
+  let deckCopy = [...deck];
   
   for (let i = 0; i < players.length; i++) {
     const playerId = players[i];
@@ -131,16 +140,18 @@ function dealTiles(table) {
     
     table.hands[playerId] = deckCopy.splice(0, tileCount);
     table.discardPiles[playerId] = [];
-    table.scores[playerId] = table.scores[playerId] || 0;
+    
+    // İlk el ise başlangıç puanlarını ver
+    if (!table.tableScores[playerId]) {
+      table.tableScores[playerId] = table.settings.startingPoints;
+      table.totalScores[playerId] = table.settings.basePoints;
+    }
   }
   
-  // 5. Kalan taşlar ortada (48 taş)
   table.deck = deckCopy;
-  
-  // 6. Oyun başladı
   table.gameStarted = true;
   table.gameEnded = false;
-  table.hasDrawn = true; // Başlangıç oyuncusu zaten 15 taşlı
+  table.hasDrawn = true;
   
   return {
     success: true,
@@ -150,7 +161,8 @@ function dealTiles(table) {
     deckSize: table.deck.length,
     hands: Object.fromEntries(
       Object.entries(table.hands).map(([id, tiles]) => [id, tiles.length])
-    )
+    ),
+    tableScores: table.tableScores
   };
 }
 
@@ -188,7 +200,7 @@ function drawTileFromDeck(table, userId) {
 }
 
 // -------------------------------------------------------------
-// SOLDAKİ OYUNCUNUN ATTIĞI TAŞI AL
+// SOLDAN TAŞ AL
 // -------------------------------------------------------------
 function drawTileFromDiscard(table, userId) {
   const uid = userId.toString();
@@ -205,12 +217,10 @@ function drawTileFromDiscard(table, userId) {
     return { success: false, reason: "Alınacak taş yok" };
   }
   
-  // Soldaki oyuncuyu bul
   const currentIdx = table.currentTurnIndex;
   const leftIdx = (currentIdx - 1 + 4) % 4;
   const leftPlayerId = table.players[leftIdx].id.toString();
   
-  // Sadece soldaki oyuncunun attığı son taşı alabilir
   if (table.lastDiscardedBy !== leftPlayerId) {
     return { success: false, reason: "Sadece solunuzdaki oyuncunun taşını alabilirsiniz" };
   }
@@ -218,7 +228,6 @@ function drawTileFromDiscard(table, userId) {
   const tile = table.lastDiscarded;
   table.hands[uid].push(tile);
   
-  // Soldaki oyuncunun discard pile'ından sil
   const leftPile = table.discardPiles[leftPlayerId];
   if (leftPile && leftPile.length > 0) {
     leftPile.pop();
@@ -228,10 +237,7 @@ function drawTileFromDiscard(table, userId) {
   table.lastDiscardedBy = null;
   table.hasDrawn = true;
 
-  return { 
-    success: true, 
-    tile: tile 
-  };
+  return { success: true, tile: tile };
 }
 
 // -------------------------------------------------------------
@@ -252,7 +258,6 @@ function discardTile(table, userId, tile) {
     return { success: false, reason: "Elinizde 15 taş olmalı" };
   }
 
-  // Taşı elde bul ve çıkar
   const hand = table.hands[uid];
   const index = hand.findIndex(t => sameTile(t, tile));
   
@@ -262,12 +267,10 @@ function discardTile(table, userId, tile) {
 
   const removed = hand.splice(index, 1)[0];
   
-  // Discard pile'a ekle
   table.discardPiles[uid].push(removed);
   table.lastDiscarded = removed;
   table.lastDiscardedBy = uid;
   
-  // Sırayı sonraki oyuncuya geçir
   const nextIdx = getNextPlayerIndex(table.currentTurnIndex);
   const nextPlayer = table.players[nextIdx];
   
@@ -285,9 +288,10 @@ function discardTile(table, userId, tile) {
 // -------------------------------------------------------------
 // OYUNU BİTİR
 // 
-// Oyuncu 15 taşla bitirmek istediğinde:
-// 1. Eli kontrol et (14 taş geçerli gruplar + 1 taş atılacak)
-// 2. Kazandıysa puanla
+// Puanlama:
+// - Normal bitiş: 2 puan
+// - Çift bitiş: 4 puan
+// - Okey ile bitiş: Puan x4
 // -------------------------------------------------------------
 function finishGame(table, userId) {
   const uid = userId.toString();
@@ -308,14 +312,56 @@ function finishGame(table, userId) {
     return { success: false, reason: result.reason || "Geçersiz el" };
   }
 
-  // Kazandı!
-  const score = calculateScore(result);
-  table.scores[uid] = (table.scores[uid] || 0) + score;
+  // ═══════════════════════════════════════════════════════════
+  // PUANLAMA HESAPLA
+  // ═══════════════════════════════════════════════════════════
+  
+  // Atılan taş okey mi?
+  const discardedIsOkey = result.discardedTile && 
+    isWildcard(result.discardedTile, table.okeyTile);
+  
+  // Temel puan
+  let basePenalty = 2; // Normal bitiş
+  
+  // Çift bitiş kontrolü (7 çift ile bitirme - ayrı kontrol gerekir)
+  // Şimdilik sadece normal bitiş
+  
+  // Okey ile bitirildiyse x4
+  if (discardedIsOkey) {
+    basePenalty = basePenalty * 4;
+  }
+  
+  // Puan değişiklikleri
+  const scoreChanges = {};
+  const players = table.players.map(p => p.id.toString());
+  
+  for (const playerId of players) {
+    if (playerId === uid) {
+      // Kazanan puanı değişmez
+      scoreChanges[playerId] = 0;
+    } else {
+      // Diğerleri puan kaybeder
+      scoreChanges[playerId] = -basePenalty;
+      table.tableScores[playerId] = Math.max(0, (table.tableScores[playerId] || 0) - basePenalty);
+    }
+  }
+  
+  // Oyun bitti mi? (Birinin puanı 0'a düştü mü?)
+  let gameOver = false;
+  let loser = null;
+  
+  for (const playerId of players) {
+    if (table.tableScores[playerId] <= 0) {
+      gameOver = true;
+      loser = playerId;
+      break;
+    }
+  }
   
   table.gameEnded = true;
   table.winner = uid;
   
-  // Son taşı ortaya bırak (deste yerine)
+  // Son taşı ortaya bırak
   if (result.discardedTile) {
     table.discardPiles[uid].push(result.discardedTile);
     table.hands[uid] = table.hands[uid].filter(t => !sameTile(t, result.discardedTile));
@@ -325,11 +371,110 @@ function finishGame(table, userId) {
     success: true,
     won: true,
     winnerId: uid,
-    score: score,
-    totalScore: table.scores[uid],
+    winnerName: table.players.find(p => p.id.toString() === uid)?.name || 'Oyuncu',
+    
+    // El sonucu
+    roundResult: {
+      basePenalty: basePenalty,
+      discardedIsOkey: discardedIsOkey,
+      scoreChanges: scoreChanges
+    },
+    
+    // Güncel puanlar
+    tableScores: table.tableScores,
+    
+    // Oyun tamamen bitti mi?
+    gameOver: gameOver,
+    loser: loser,
+    loserName: loser ? table.players.find(p => p.id.toString() === loser)?.name : null,
+    
+    // Gruplar (debug)
     groups: result.groups,
     usedOkey: result.usedOkey
   };
+}
+
+// -------------------------------------------------------------
+// ÇİFT BİTİRME (7 çift)
+// -------------------------------------------------------------
+function finishWithPairs(table, userId) {
+  const uid = userId.toString();
+  
+  if (table.currentTurnPlayerId !== uid) {
+    return { success: false, reason: "Sıra sizde değil" };
+  }
+  
+  const hand = table.hands[uid];
+  
+  // Çift bitiş için 14 taş gerekli (taş çekmeden bitirir)
+  if (hand.length !== 14) {
+    return { success: false, reason: "Çift bitiş için 14 taş gerekli" };
+  }
+
+  const result = checkPairsWinning(hand, table.okeyTile);
+  
+  if (!result.won) {
+    return { success: false, reason: result.reason || "7 çift yok" };
+  }
+
+  // Çift bitiş: 4 puan
+  const basePenalty = 4;
+  
+  const scoreChanges = {};
+  const players = table.players.map(p => p.id.toString());
+  
+  for (const playerId of players) {
+    if (playerId === uid) {
+      scoreChanges[playerId] = 0;
+    } else {
+      scoreChanges[playerId] = -basePenalty;
+      table.tableScores[playerId] = Math.max(0, (table.tableScores[playerId] || 0) - basePenalty);
+    }
+  }
+  
+  let gameOver = false;
+  let loser = null;
+  
+  for (const playerId of players) {
+    if (table.tableScores[playerId] <= 0) {
+      gameOver = true;
+      loser = playerId;
+      break;
+    }
+  }
+  
+  table.gameEnded = true;
+  table.winner = uid;
+
+  return {
+    success: true,
+    won: true,
+    winnerId: uid,
+    winnerName: table.players.find(p => p.id.toString() === uid)?.name || 'Oyuncu',
+    isPairsWin: true,
+    
+    roundResult: {
+      basePenalty: basePenalty,
+      isPairsWin: true,
+      scoreChanges: scoreChanges
+    },
+    
+    tableScores: table.tableScores,
+    gameOver: gameOver,
+    loser: loser,
+    loserName: loser ? table.players.find(p => p.id.toString() === loser)?.name : null,
+    
+    pairs: result.pairs
+  };
+}
+
+// -------------------------------------------------------------
+// YENİ EL BAŞLAT
+// -------------------------------------------------------------
+function startNewRound(table) {
+  table.roundNumber = (table.roundNumber || 0) + 1;
+  resetTableForNewRound(table);
+  return dealTiles(table);
 }
 
 // -------------------------------------------------------------
@@ -350,6 +495,7 @@ function getGameState(table, userId) {
     tableId: table.id,
     gameStarted: table.gameStarted,
     gameEnded: table.gameEnded,
+    roundNumber: table.roundNumber,
     
     indicator: table.indicator,
     okeyTile: table.okeyTile,
@@ -371,11 +517,13 @@ function getGameState(table, userId) {
       avatar: p.avatar,
       tileCount: (table.hands[p.id.toString()] || []).length,
       discardCount: (table.discardPiles[p.id.toString()] || []).length,
-      score: table.scores[p.id.toString()] || 0
+      tableScore: table.tableScores[p.id.toString()] || 0,
+      totalScore: table.totalScores[p.id.toString()] || 1000
     })),
     
-    winner: table.winner,
-    scores: table.scores
+    settings: table.settings,
+    tableScores: table.tableScores,
+    winner: table.winner
   };
 }
 
@@ -384,12 +532,15 @@ module.exports = {
   tables,
   getOrCreateTable,
   createEmptyTable,
-  resetTable,
+  updateTableSettings,
+  resetTableForNewRound,
   dealTiles,
   drawTileFromDeck,
   drawTileFromDiscard,
   discardTile,
   finishGame,
+  finishWithPairs,
+  startNewRound,
   getPlayerHand,
   getGameState
 };
