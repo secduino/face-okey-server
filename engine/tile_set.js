@@ -1,112 +1,146 @@
-// /engine/tile_set.js
+// /engine/tile_util.js
 
 // -------------------------------------------------------------
-// OKEY OYUNU TAŞ SETİ
+// OKEY MOTORU TAŞ YARDIMCI FONKSİYONLARI
+// -------------------------------------------------------------
+//
+// TAŞ OBJESİ FORMAT:
+// Normal taş: { color: "blue", number: 5, fakeJoker: false }
+// Sahte okey: { color: "joker", number: 0, fakeJoker: true }
+//
+// RENKLER: blue, red, black, green
+// SAYILAR: 1-13
+// -------------------------------------------------------------
+
+const VALID_COLORS = ["blue", "red", "black", "green"];
+
+// -------------------------------------------------------------
+// Taşın sıralama değeri
+// -------------------------------------------------------------
+function tileSortValue(tile) {
+  if (tile.fakeJoker) return 9999;
+  if (tile.color === "joker") return 9998;
+  return tile.number;
+}
+
+// -------------------------------------------------------------
+// Taşları sırala (sayı → renk)
+// -------------------------------------------------------------
+function sortTiles(hand) {
+  const colorOrder = { blue: 0, red: 1, black: 2, green: 3, joker: 4 };
+  
+  return hand.slice().sort((a, b) => {
+    const av = tileSortValue(a);
+    const bv = tileSortValue(b);
+    if (av !== bv) return av - bv;
+    return (colorOrder[a.color] || 0) - (colorOrder[b.color] || 0);
+  });
+}
+
+// -------------------------------------------------------------
+// İki taş aynı mı?
+// -------------------------------------------------------------
+function sameTile(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.color === b.color &&
+    a.number === b.number &&
+    !!a.fakeJoker === !!b.fakeJoker
+  );
+}
+
+// -------------------------------------------------------------
+// Sahte okey mi? (joker taşları)
+// -------------------------------------------------------------
+function isFakeJoker(tile) {
+  return tile.fakeJoker === true;
+}
+
+// -------------------------------------------------------------
+// Normal taş mı?
+// -------------------------------------------------------------
+function isNormalTile(tile) {
+  return !isFakeJoker(tile) && tile.color !== "joker";
+}
+
+// -------------------------------------------------------------
+// Renk geçerli mi?
+// -------------------------------------------------------------
+function isValidColor(color) {
+  return VALID_COLORS.includes(color);
+}
+
+// -------------------------------------------------------------
+// Taş okey mi? (okeyTile ile karşılaştır)
 // 
-// KURALLAR:
-// - 106 taş toplam (104 normal + 2 sahte okey)
-// - 4 renk: Mavi, Kırmızı, Siyah, Yeşil
-// - Her renkte 1-13 arası sayılar, her taştan 2'şer adet
-// - 2 adet sahte okey (joker)
+// Bir taş okey sayılır eğer:
+// 1. Sahte okey (joker) ise
+// 2. Göstergenin bir üstü ise (aynı renk, number+1)
 // -------------------------------------------------------------
-
-const COLORS = ["blue", "red", "black", "green"];
-const MIN_NUMBER = 1;
-const MAX_NUMBER = 13;
+function isOkeyTile(tile, okeyTile) {
+  if (isFakeJoker(tile)) return true;
+  
+  return (
+    tile.color === okeyTile.color &&
+    tile.number === okeyTile.number
+  );
+}
 
 // -------------------------------------------------------------
-// 1) 106 TAŞ OLUŞTURMA
+// Taşı okey olarak uygula
+// 
+// Sahte okey veya gerçek okey taşı → joker gibi davranır
+// Normal taş → olduğu gibi döner
 // -------------------------------------------------------------
-function createTileDeck() {
-  const deck = [];
+function applyOkey(tile, okeyTile) {
+  if (!tile) return null;
 
-  // 4 renk x 13 sayı x 2 adet = 104 taş
-  for (const color of COLORS) {
-    for (let n = MIN_NUMBER; n <= MAX_NUMBER; n++) {
-      // Her taştan 2 adet (aynı renk, aynı sayı)
-      deck.push({ color, number: n, fakeJoker: false });
-      deck.push({ color, number: n, fakeJoker: false });
-    }
+  // Sahte okey (joker) → wildcard olarak işaretlenir
+  if (isFakeJoker(tile)) {
+    return {
+      ...tile,
+      isWildcard: true
+    };
   }
 
-  // 2 adet sahte okey (joker)
-  deck.push({ color: "joker", number: 0, fakeJoker: true });
-  deck.push({ color: "joker", number: 0, fakeJoker: true });
-
-  return deck; // Toplam: 106 taş
-}
-
-// -------------------------------------------------------------
-// 2) Fisher–Yates Shuffle
-// -------------------------------------------------------------
-function shuffle(deck) {
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
-  }
-}
-
-// -------------------------------------------------------------
-// 3) Gösterge + Okey Belirleme
-// 
-// Gösterge = joker olmayan rastgele bir taş
-// Okey = göstergenin aynı renk + number+1 (13 ise → 1)
-// -------------------------------------------------------------
-function pickIndicatorAndOkey(deck) {
-  // Joker olmayan bir taş bul
-  const idx = deck.findIndex(t => t.color !== "joker");
-  if (idx === -1) {
-    return { deck, indicator: null, okeyTile: null };
+  // Gerçek okey taşı → wildcard olarak işaretlenir
+  if (isOkeyTile(tile, okeyTile)) {
+    return {
+      ...tile,
+      isWildcard: true
+    };
   }
 
-  const indicator = deck[idx];
-
-  // Gösterge taşı desteden çıkarılır (toplam 1 taş kullanıldı)
-  deck.splice(idx, 1);
-
-  // Okey taşını belirle: göstergenin bir üstü
-  const okeyNumber = indicator.number === MAX_NUMBER ? MIN_NUMBER : indicator.number + 1;
-
-  const okeyTile = {
-    color: indicator.color,
-    number: okeyNumber,
-    fakeJoker: false
-  };
-
-  return { deck, indicator, okeyTile };
+  // Normal taş
+  return tile;
 }
 
 // -------------------------------------------------------------
-// ANA FONKSİYON → Deste hazır + karışmış + okey belirlenmiş
-// 
-// Dönüş:
-// - deck: 105 taş (gösterge çıkarıldı)
-// - indicator: gösterge taşı
-// - okeyTile: okey taşı bilgisi
+// Wildcard mı? (okey veya sahte okey)
 // -------------------------------------------------------------
-function generateFullSet() {
-  let deck = createTileDeck(); // 106 taş
-  shuffle(deck);
-
-  const result = pickIndicatorAndOkey(deck);
-  deck = result.deck; // 105 taş kaldı
-
-  return {
-    deck,
-    indicator: result.indicator,
-    okeyTile: result.okeyTile
-  };
+function isWildcard(tile, okeyTile) {
+  return isFakeJoker(tile) || isOkeyTile(tile, okeyTile);
 }
 
 // -------------------------------------------------------------
-// SABÎTLER EXPORT
+// Taşın görüntü değeri (debug/log için)
+// -------------------------------------------------------------
+function tileToString(tile) {
+  if (isFakeJoker(tile)) return "JOKER";
+  return `${tile.color}-${tile.number}`;
+}
+
 // -------------------------------------------------------------
 module.exports = {
-  COLORS,
-  MIN_NUMBER,
-  MAX_NUMBER,
-  createTileDeck,
-  shuffle,
-  pickIndicatorAndOkey,
-  generateFullSet
+  VALID_COLORS,
+  tileSortValue,
+  sortTiles,
+  sameTile,
+  isFakeJoker,
+  isNormalTile,
+  isValidColor,
+  isOkeyTile,
+  applyOkey,
+  isWildcard,
+  tileToString
 };
