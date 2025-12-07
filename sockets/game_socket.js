@@ -3,12 +3,13 @@
 
 const {
   getOrCreateTable,
-  resetTable,
+  resetTableForNewRound,
   dealTiles,
   drawTileFromDeck,
   drawTileFromDiscard,
   discardTile,
   finishGame,
+  startNewRound,
   getGameState
 } = require("../engine/game_state");
 
@@ -364,7 +365,7 @@ module.exports = (io, socket, vipRooms) => {
   // ═══════════════════════════════════════════════════════════
 
   socket.on("game:new_round", ({ tableId, userId }) => {
-    const stateTable = getTable(tableId);
+    const stateTable = getOrCreateTable(tableId);
     const uid = userId.toString();
 
     // Sadece masa sahibi yeni el başlatabilir
@@ -373,7 +374,7 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
-    const result = require('./game_state').startNewRound(stateTable);
+    const result = startNewRound(stateTable);
 
     if (!result.success) {
       socket.emit("game:error", { message: result.reason });
@@ -381,17 +382,28 @@ module.exports = (io, socket, vipRooms) => {
     }
 
     console.log("🎮 YENİ EL BAŞLADI! Round:", stateTable.roundNumber);
+    console.log("📊 Başlangıç oyuncusu:", result.startingPlayerId);
+    console.log("📊 Deste:", result.deckSize, "taş");
 
-    io.to(tableId).emit("game:state_changed", {
-      tableId,
-      hands: stateTable.hands,
-      indicator: result.indicator,
-      okey: result.okeyTile,
-      currentTurnPlayerId: result.startingPlayerId,
-      deckCount: result.deckSize,
-      tableScores: result.tableScores,
-      roundNumber: stateTable.roundNumber
-    });
+    // Her oyuncuya kendi elini gönder
+    for (const player of stateTable.players) {
+      const playerId = player.id.toString();
+      const playerSocket = [...io.sockets.sockets.values()].find(s => s.odUserId === playerId);
+      
+      if (playerSocket) {
+        playerSocket.emit("game:state_changed", {
+          tableId,
+          hand: stateTable.hands[playerId],
+          indicator: result.indicator,
+          okey: result.okeyTile,
+          currentTurnPlayerId: result.startingPlayerId,
+          deckCount: result.deckSize,
+          tableScores: result.tableScores,
+          roundNumber: stateTable.roundNumber,
+          gameStarted: true
+        });
+      }
+    }
   });
 
   // ═══════════════════════════════════════════════════════════
