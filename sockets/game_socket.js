@@ -88,14 +88,12 @@ module.exports = (io, socket, vipRooms) => {
 
     io.to(tableId).emit("game:player_joined", {
       tableId,
-      user,
-      ownerId: roomTable.ownerId // 👈 EKLENDİ
+      user
     });
 
     io.to(tableId).emit("game:ready_changed", {
       tableId,
-      ready: roomTable.ready,
-      ownerId: roomTable.ownerId // 👈 EKLENDİ
+      ready: roomTable.ready
     });
 
     console.log("✅ Oyuncu masaya eklendi:", user.id, "Socket:", socket.id);
@@ -120,8 +118,7 @@ module.exports = (io, socket, vipRooms) => {
 
     io.to(tableId).emit("game:ready_changed", {
       tableId,
-      ready: roomTable.ready,
-      ownerId: roomTable.ownerId // 👈 EKLENDİ
+      ready: roomTable.ready
     });
 
     console.log("✅ Hazır durumu değişti:", uid, "->", ready);
@@ -190,8 +187,7 @@ module.exports = (io, socket, vipRooms) => {
       indicator: stateTable.indicator,
       okey: stateTable.okeyTile,
       deckCount: stateTable.deck.length,
-      gameStarted: true,
-      ownerId: stateTable.ownerId // 👈 EKLENDİ (opsiyonel ama tutarlılık için)
+      gameStarted: true
     });
 
     console.log("✅ game:state_changed event gönderildi");
@@ -380,8 +376,7 @@ module.exports = (io, socket, vipRooms) => {
 
     io.to(tableId).emit("game:ready_changed", {
       tableId,
-      ready: roomTable.ready || {},
-      ownerId: roomTable.ownerId // 👈 EKLENDİ
+      ready: roomTable.ready || {}
     });
 
     // Masa boşsa reset
@@ -404,8 +399,7 @@ module.exports = (io, socket, vipRooms) => {
 
     socket.emit("game:state_sync", {
       tableId,
-      ...state,
-      ownerId: stateTable.ownerId // 👈 EKLENDİ
+      ...state
     });
   });
 
