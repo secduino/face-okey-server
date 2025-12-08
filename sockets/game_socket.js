@@ -131,6 +131,7 @@ module.exports = (io, socket, vipRooms) => {
 
   socket.on("game:start", (payload) => {
     const tableId = payload?.tableId;
+    const startingPoints = payload?.startingPoints || 20;
 
     if (!tableId) {
       socket.emit("game:error", { message: "tableId gerekli" });
@@ -162,6 +163,11 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
+    // Başlangıç puanını ayarla
+    const validPoints = [5, 7, 20];
+    stateTable.settings.startingPoints = validPoints.includes(startingPoints) ? startingPoints : 20;
+    console.log("📊 Başlangıç puanı:", stateTable.settings.startingPoints);
+
     // State table'ı senkronize et
     syncTablePlayers(roomTable, stateTable);
 
@@ -188,6 +194,8 @@ module.exports = (io, socket, vipRooms) => {
       indicator: stateTable.indicator,
       okey: stateTable.okeyTile,
       deckCount: stateTable.deck.length,
+      tableScores: stateTable.tableScores,
+      totalScores: stateTable.totalScores,
       gameStarted: true
     });
 
@@ -398,7 +406,8 @@ module.exports = (io, socket, vipRooms) => {
       indicator: result.indicator,
       okey: result.okeyTile,
       deckCount: result.deckSize,
-      tableScores: result.tableScores,
+      tableScores: stateTable.tableScores,
+      totalScores: stateTable.totalScores,
       roundNumber: stateTable.roundNumber,
       gameStarted: true
     });
