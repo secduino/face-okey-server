@@ -262,7 +262,7 @@ function checkWinning(hand, okeyTile) {
   console.log("El:", hand.map(t => tileToString(t)).join(', '));
   console.log("Okey taşı:", tileToString(okeyTile));
 
-  // Her taşı atarak dene
+  // 🔹 1. Geleneksel yol: her taşı atarak grup/seri analizi yap
   for (let i = 0; i < hand.length; i++) {
     const discarded = hand[i];
     const remaining = hand.filter((_, idx) => idx !== i);
@@ -270,7 +270,7 @@ function checkWinning(hand, okeyTile) {
     const result = analyzeHand(remaining, okeyTile);
     
     if (result.valid) {
-      console.log("✅ Kazandı! Atılan:", tileToString(discarded));
+      console.log("✅ Kazandı! (Grup/Seri) Atılan:", tileToString(discarded));
       
       // Grupları doğrula ve logla
       console.log("Gruplar:");
@@ -286,13 +286,30 @@ function checkWinning(hand, okeyTile) {
         won: true,
         discardedTile: discarded,
         groups: result.groups,
-        usedOkey: remaining.some(t => isWildcard(t, okeyTile))
+        usedOkey: remaining.some(t => isWildcard(t, okeyTile)),
+        isPairsWin: false
+      };
+    }
+  }
+
+  // 🔹 2. YENİ: ÇİFT bitme kontrolü — her taşı "fazla taş" olarak düşün ve çift kontrolü yap
+  for (let i = 0; i < hand.length; i++) {
+    const possibleExtra = hand[i];
+    const fourteenTiles = hand.filter((_, idx) => idx !== i);
+    const pairResult = checkPairsWinning(fourteenTiles, okeyTile);
+    if (pairResult.won) {
+      console.log("✅ Kazandı! (Çift) Atılan (fazla taş):", tileToString(possibleExtra));
+      return {
+        won: true,
+        discardedTile: possibleExtra,
+        pairs: pairResult.pairs,
+        isPairsWin: true
       };
     }
   }
 
   console.log("❌ Kazanamadı");
-  return { won: false, reason: "Geçerli dizilim bulunamadı" };
+  return { won: false, reason: "Geçerli dizilim veya 7 çift bulunamadı" };
 }
 
 // -------------------------------------------------------------
