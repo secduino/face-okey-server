@@ -135,11 +135,21 @@ function isValidGroup(tiles, okeyTile) {
 }
 
 // -------------------------------------------------------------
-// ÇİFT KONTROLÜ
+// ÇİFT KONTROLÜ (Okey destekli)
 // -------------------------------------------------------------
-function isValidPair(tile1, tile2) {
+function isValidPair(tile1, tile2, okeyTile) {
   if (!tile1 || !tile2) return false;
-  if (!isNormalTile(tile1) || !isNormalTile(tile2)) return false;
+  
+  const isOkey1 = isWildcard(tile1, okeyTile);
+  const isOkey2 = isWildcard(tile2, okeyTile);
+  
+  // İki Okey = geçerli çift
+  if (isOkey1 && isOkey2) return true;
+  
+  // Bir Okey + bir normal taş = geçerli çift
+  if (isOkey1 || isOkey2) return true;
+  
+  // İki normal taş - aynı renk ve sayı olmalı
   return tile1.color === tile2.color && tile1.number === tile2.number;
 }
 
@@ -286,28 +296,83 @@ function checkWinning(hand, okeyTile) {
 }
 
 // -------------------------------------------------------------
-// ÇİFT BİTİRME KONTROLÜ (7 çift)
+// ÇİFT BİTİRME KONTROLÜ (7 çift) - Okey destekli
 // -------------------------------------------------------------
 function checkPairsWinning(hand, okeyTile) {
   if (hand.length !== 14) return { won: false, reason: "14 taş gerekli" };
 
-  const sorted = sortTiles(hand);
-  const pairs = [];
+  console.log("🔍 Çift bitiş kontrolü başladı");
+  console.log("El:", hand.map(t => tileToString(t)).join(', '));
 
-  for (let i = 0; i < sorted.length; i += 2) {
-    if (i + 1 >= sorted.length) return { won: false, reason: "Tek taş kaldı" };
-    
-    const tile1 = sorted[i];
-    const tile2 = sorted[i + 1];
+  // Okey taşlarını ve normal taşları ayır
+  const wildcards = hand.filter(t => isWildcard(t, okeyTile));
+  const normals = hand.filter(t => !isWildcard(t, okeyTile));
 
-    if (!isValidPair(tile1, tile2)) {
-      return { won: false, reason: "Geçersiz çift" };
+  console.log("Okey sayısı:", wildcards.length);
+  console.log("Normal taş sayısı:", normals.length);
+
+  // Backtracking ile çift bul
+  function findPairs(remaining, wilds, pairs) {
+    // Tüm taşlar eşleşti
+    if (remaining.length === 0 && wilds.length === 0) {
+      return { found: true, pairs };
     }
 
-    pairs.push([tile1, tile2]);
+    // Kalan taş sayısı tek ise ve wild yoksa başarısız
+    if (remaining.length % 2 !== 0 && wilds.length === 0) {
+      return { found: false };
+    }
+
+    // Eğer normal taş kalmadıysa, wildcard'ları eşleştir
+    if (remaining.length === 0) {
+      if (wilds.length % 2 === 0) {
+        const wildPairs = [];
+        for (let i = 0; i < wilds.length; i += 2) {
+          wildPairs.push([wilds[i], wilds[i + 1]]);
+        }
+        return { found: true, pairs: [...pairs, ...wildPairs] };
+      }
+      return { found: false };
+    }
+
+    // İlk taşı al
+    const first = remaining[0];
+    const rest = remaining.slice(1);
+
+    // Aynı taşı ara (çift)
+    for (let i = 0; i < rest.length; i++) {
+      const candidate = rest[i];
+      if (candidate.color === first.color && candidate.number === first.number) {
+        // Çift bulundu
+        const newRemaining = rest.filter((_, idx) => idx !== i);
+        const result = findPairs(newRemaining, wilds, [...pairs, [first, candidate]]);
+        if (result.found) return result;
+      }
+    }
+
+    // Çift bulunamadı, wildcard ile eşleştir
+    if (wilds.length > 0) {
+      const wild = wilds[0];
+      const newWilds = wilds.slice(1);
+      const result = findPairs(rest, newWilds, [...pairs, [first, wild]]);
+      if (result.found) return result;
+    }
+
+    return { found: false };
   }
 
-  return { won: true, pairs: pairs, isPairsWin: true };
+  const result = findPairs(normals, wildcards, []);
+
+  if (result.found) {
+    console.log("✅ Çift bitiş başarılı! Çiftler:");
+    result.pairs.forEach((pair, idx) => {
+      console.log(`  Çift ${idx + 1}: ${tileToString(pair[0])} - ${tileToString(pair[1])}`);
+    });
+    return { won: true, pairs: result.pairs, isPairsWin: true };
+  }
+
+  console.log("❌ Çift bitiş başarısız");
+  return { won: false, reason: "7 çift oluşturulamadı" };
 }
 
 // -------------------------------------------------------------
