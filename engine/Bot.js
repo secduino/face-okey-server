@@ -9,7 +9,8 @@ class Bot {
     this.name = name;
     this.hand = hand;
     this.isBot = true;
-    this.socketId = null; // Bot'un socket'i yok
+    this.socketId = null;
+    this.avatar = "bot";
   }
 
   chooseDiscard(okeyTile) {
@@ -37,20 +38,25 @@ class Bot {
   }
 
   makeMove(deck, discardPile, okeyTile) {
-    if (deck.length === 0) return { action: 'wait' };
+    if (deck.length === 0) {
+      return { action: 'wait', reason: 'deck_empty' };
+    }
 
-    // Taş çek
-    const drawn = deck.pop();
+    const drawn = deck.shift();
     this.hand.push(drawn);
 
-    // Hemen bitiyor mu?
     if (checkWinning(this.hand, okeyTile).won) {
       return { action: 'win', discarded: null };
     }
 
-    // Atış
     const toDiscard = this.chooseDiscard(okeyTile);
-    this.hand = this.hand.filter(t => t !== toDiscard);
+    if (!toDiscard) return { action: 'wait', reason: 'no_discard' };
+
+    this.hand = this.hand.filter(t => !(
+      t.color === toDiscard.color &&
+      t.number === toDiscard.number &&
+      !!t.fakeJoker === !!toDiscard.fakeJoker
+    ));
     discardPile.push(toDiscard);
 
     return { action: 'discard', discarded: toDiscard };
