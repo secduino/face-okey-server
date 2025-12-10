@@ -129,28 +129,53 @@ function discardTile(hand, tile, discardPile) {
 // OYUNU BİTİR
 // 
 // Oyuncu 15 taşla bitirmeye çalışır:
-// 1. 14 taş geçerli gruplar oluşturmalı
-// 2. 1 taş ortaya (deste yerine) bırakılır
+// 1. Önce normal bitiş: 14 taş geçerli gruplar + 1 taş at
+// 2. Sonra çift bitiş: 7 çift (14 taş) + 1 taş at
 // -------------------------------------------------------------
 function finishGame(hand, okeyTile) {
   if (hand.length !== 15) {
     return { success: false, reason: "15 taş gerekli" };
   }
 
-  const result = checkWinning(hand, okeyTile);
+  // Önce normal bitiş kontrolü (per/seri)
+  const normalResult = checkWinning(hand, okeyTile);
   
-  if (result.won) {
+  if (normalResult.won) {
     return {
       success: true,
       won: true,
-      discardedTile: result.discardedTile,
-      groups: result.groups,
-      usedOkey: result.usedOkey,
-      score: calculateScore(result)
+      discardedTile: normalResult.discardedTile,
+      groups: normalResult.groups,
+      usedOkey: normalResult.usedOkey,
+      isPairsWin: false,
+      score: calculateScore(normalResult)
     };
   }
 
-  return { success: false, won: false, reason: result.reason };
+  // Normal bitiş olmadıysa, çift bitiş dene
+  // Her taşı atarak 14 taşlık çift kombinasyonu ara
+  console.log("🔄 Normal bitiş olmadı, çift bitiş deneniyor...");
+  
+  for (let i = 0; i < hand.length; i++) {
+    const discarded = hand[i];
+    const remaining = hand.filter((_, idx) => idx !== i);
+    
+    const pairsResult = checkPairsWinning(remaining, okeyTile);
+    
+    if (pairsResult.won) {
+      console.log("✅ Çift bitiş başarılı! Atılan:", tileToString(discarded));
+      return {
+        success: true,
+        won: true,
+        discardedTile: discarded,
+        pairs: pairsResult.pairs,
+        isPairsWin: true,
+        score: 4 // Çift bitiş 4 puan
+      };
+    }
+  }
+
+  return { success: false, won: false, reason: "Geçerli dizilim veya çift bulunamadı" };
 }
 
 // -------------------------------------------------------------
