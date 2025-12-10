@@ -262,7 +262,7 @@ function checkWinning(hand, okeyTile) {
   console.log("El:", hand.map(t => tileToString(t)).join(', '));
   console.log("Okey taşı:", tileToString(okeyTile));
 
-  // 🔹 1. Geleneksel yol: her taşı atarak grup/seri analizi yap
+  // 🔹 1. ADIM: NORMAL BİTME (grup/seri) — BU ÖNCELİKLİ YOL
   for (let i = 0; i < hand.length; i++) {
     const discarded = hand[i];
     const remaining = hand.filter((_, idx) => idx !== i);
@@ -292,7 +292,9 @@ function checkWinning(hand, okeyTile) {
     }
   }
 
-  // 🔹 2. YENİ: ÇİFT bitme kontrolü — her taşı "fazla taş" olarak düşün ve çift kontrolü yap
+  // 🔹 2. ADIM: SADECE normal bitme başarısızsa → ÇİFT kontrolü
+  console.log("🔄 Normal bitme başarısız. Çift kontrolü deneniyor...");
+
   for (let i = 0; i < hand.length; i++) {
     const possibleExtra = hand[i];
     const fourteenTiles = hand.filter((_, idx) => idx !== i);
