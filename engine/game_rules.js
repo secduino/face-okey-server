@@ -5,6 +5,7 @@
 // 
 // SERİ (Run): Aynı renk, ardışık sayılar (min 3 taş, max 13)
 //   Örnek: Mavi 4-5-6-7
+//   Özel kural: 11-12-13-1 GEÇERLİDİR. 13-1-2 GEÇERSİZDİR.
 //
 // PER (Set): Aynı sayı, farklı renkler (min 3, max 4 taş)
 //   Örnek: Kırmızı 7, Mavi 7, Siyah 7
@@ -21,20 +22,17 @@ const {
 } = require("./tile_util");
 
 // -------------------------------------------------------------
-// SERİ KONTROLÜ (Run)
-// Aynı renk, ardışık sayılar, minimum 3 taş
-// Wildcard (okey/joker) herhangi bir taşın yerine geçebilir
+// SERİ KONTROLÜ (Run) – DÖNGÜSEL SERİ (13-1) DESTEKLİ
 // -------------------------------------------------------------
+
 function isValidRun(tiles, okeyTile) {
   if (tiles.length < 3) return false;
 
   const wildcards = tiles.filter(t => isWildcard(t, okeyTile));
   const normals = tiles.filter(t => !isWildcard(t, okeyTile));
 
-  // Tamamı wildcard olamaz (en az 1 normal taş olmalı)
   if (normals.length === 0) return false;
 
-  // Tüm normal taşlar aynı renkte olmalı
   const baseColor = normals[0].color;
   for (const tile of normals) {
     if (tile.color !== baseColor) return false;
@@ -42,59 +40,59 @@ function isValidRun(tiles, okeyTile) {
 
   if (!isValidColor(baseColor)) return false;
 
-  // Sayılara göre sırala
-  const numbers = normals.map(t => t.number).sort((a, b) => a - b);
-  
-  // Aynı sayı varsa geçersiz
+  let numbers = normals.map(t => t.number).sort((a, b) => a - b);
+
+  // Aynı sayı olmamalı
   for (let i = 0; i < numbers.length - 1; i++) {
     if (numbers[i] === numbers[i + 1]) return false;
   }
 
-  // Toplam uzunluk = normal taşlar + wildcardlar
   const totalLength = tiles.length;
-  
-  // Min ve max sayıları bul
+
+  // 🔹 DÖNGÜSEL SERİ KONTROLÜ: 1 VE 13 BİRLİKTEYSE
+  if (numbers.includes(1) && numbers.includes(13)) {
+    // Sadece şu sayılar geçerli: 1, 11, 12, 13
+    for (const n of numbers) {
+      if (n !== 1 && n !== 11 && n !== 12 && n !== 13) {
+        return false;
+      }
+    }
+
+    // 13-1 serisi sadece 11-12-13-1, 12-13-1 veya 11-13-1 gibi yapılar olabilir
+    // Joker ile eksik sayılar tamamlanabilir
+
+    const fullCycle = [11, 12, 13, 1];
+    const present = new Set(numbers);
+    const missingCount = fullCycle.filter(n => !present.has(n)).length;
+
+    // Joker sayısı eksik sayıyı karşılamalı
+    if (wildcards.length < missingCount) return false;
+
+    // Toplam taş >= 3 (zaten sağlanıyor)
+    return totalLength >= 3;
+  }
+
+  // 🔹 NORMAL SERİ (döngü yok)
   const minNum = numbers[0];
   const maxNum = numbers[numbers.length - 1];
-  
-  // Seri aralığı kontrolü (1-13 arası olmalı)
-  // Wildcard'larla birlikte seri oluşturulabilir mi?
-  
-  // En kısa olası seri: maxNum - minNum + 1
   const minRequiredLength = maxNum - minNum + 1;
-  
-  // Eğer toplam taş sayısı minimum gerekenden azsa, wildcardlarla genişletebiliriz
-  // Ama seri 1'den küçük veya 13'ten büyük olamaz
-  
-  if (totalLength < minRequiredLength) {
-    // Yeterli taş yok
-    return false;
-  }
-  
+
+  if (totalLength < minRequiredLength) return false;
+
   if (totalLength === minRequiredLength) {
-    // Tam sığıyor, gap'leri wildcard doldurmalı
     const gaps = minRequiredLength - numbers.length;
     return wildcards.length >= gaps;
   }
-  
-  // totalLength > minRequiredLength
-  // Seriyi sola veya sağa genişletebiliriz
-  const extraTiles = totalLength - minRequiredLength;
+
+  // totalLength > minRequiredLength → genişletme
   const gaps = minRequiredLength - numbers.length;
-  
-  // Gap'leri doldurmak için wildcard gerekiyor
-  // Kalan wildcardlar seriyi genişletir
   if (wildcards.length < gaps) return false;
-  
+
   const remainingWildcards = wildcards.length - gaps;
-  
-  // Seriyi genişletme: sola (minNum-1, minNum-2...) veya sağa (maxNum+1, maxNum+2...)
-  // Sınırlar: 1 ve 13
-  const canExpandLeft = minNum - 1; // Kaç adım sola gidilebilir (min 0)
-  const canExpandRight = 13 - maxNum; // Kaç adım sağa gidilebilir
-  
+  const canExpandLeft = minNum - 1;
+  const canExpandRight = 13 - maxNum;
   const totalExpansionPossible = canExpandLeft + canExpandRight;
-  
+
   return remainingWildcards <= totalExpansionPossible;
 }
 
@@ -143,13 +141,9 @@ function isValidPair(tile1, tile2, okeyTile) {
   const isOkey1 = isWildcard(tile1, okeyTile);
   const isOkey2 = isWildcard(tile2, okeyTile);
   
-  // İki Okey = geçerli çift
   if (isOkey1 && isOkey2) return true;
-  
-  // Bir Okey + bir normal taş = geçerli çift
   if (isOkey1 || isOkey2) return true;
   
-  // İki normal taş - aynı renk ve sayı olmalı
   return tile1.color === tile2.color && tile1.number === tile2.number;
 }
 
@@ -161,7 +155,6 @@ function analyzeHand(tiles, okeyTile) {
     return { valid: false, groups: [], reason: `14 taş gerekli, ${tiles.length} taş var` };
   }
 
-  // Hızlı backtracking - küçük gruplardan başla
   function backtrack(remaining, groups) {
     if (remaining.length === 0) {
       return { valid: true, groups: groups };
@@ -171,13 +164,10 @@ function analyzeHand(tiles, okeyTile) {
       return { valid: false };
     }
 
-    // İlk taşı içeren grupları dene (dallanmayı azaltır)
     const firstTile = remaining[0];
     const rest = remaining.slice(1);
     
-    // 3, 4, 5... taşlık grupları dene
     for (let size = 3; size <= Math.min(13, remaining.length); size++) {
-      // İlk taşı içeren kombinasyonları bul
       const combosWithFirst = getCombinationsWithFirst(remaining, size);
       
       for (const combo of combosWithFirst) {
@@ -203,24 +193,19 @@ function analyzeHand(tiles, okeyTile) {
   };
 }
 
-// İlk elemanı içeren kombinasyonlar (daha az kombinasyon)
+// Yardımcı fonksiyonlar
 function getCombinationsWithFirst(arr, size) {
   if (size < 1 || arr.length < size) return [];
-  
   const first = arr[0];
   const rest = arr.slice(1);
-  
   if (size === 1) return [[first]];
-  
   const subCombos = getCombinations(rest, size - 1);
   return subCombos.map(combo => [first, ...combo]);
 }
 
-// Standart kombinasyon
 function getCombinations(arr, size) {
   if (size === 0) return [[]];
   if (arr.length < size) return [];
-
   const result = [];
   for (let i = 0; i <= arr.length - size; i++) {
     const first = arr[i];
@@ -233,7 +218,6 @@ function getCombinations(arr, size) {
   return result;
 }
 
-// Diziden elemanları çıkar
 function removeFromArray(arr, toRemove) {
   const result = [...arr];
   for (const item of toRemove) {
@@ -262,17 +246,13 @@ function checkWinning(hand, okeyTile) {
   console.log("El:", hand.map(t => tileToString(t)).join(', '));
   console.log("Okey taşı:", tileToString(okeyTile));
 
-  // 🔹 1. ADIM: NORMAL BİTME (grup/seri) — BU ÖNCELİKLİ YOL
+  // 🔹 1. Normal bitme (grup/seri) – öncelikli
   for (let i = 0; i < hand.length; i++) {
     const discarded = hand[i];
     const remaining = hand.filter((_, idx) => idx !== i);
-    
     const result = analyzeHand(remaining, okeyTile);
-    
     if (result.valid) {
       console.log("✅ Kazandı! (Grup/Seri) Atılan:", tileToString(discarded));
-      
-      // Grupları doğrula ve logla
       console.log("Gruplar:");
       for (let g = 0; g < result.groups.length; g++) {
         const group = result.groups[g];
@@ -281,7 +261,6 @@ function checkWinning(hand, okeyTile) {
         const isSet = isValidSet(group, okeyTile);
         console.log(`  Grup ${g + 1}: ${groupStr} (Run: ${isRun}, Set: ${isSet})`);
       }
-      
       return {
         won: true,
         discardedTile: discarded,
@@ -292,9 +271,8 @@ function checkWinning(hand, okeyTile) {
     }
   }
 
-  // 🔹 2. ADIM: SADECE normal bitme başarısızsa → ÇİFT kontrolü
+  // 🔹 2. Çift kontrolü – sadece normal bitme başarısızsa
   console.log("🔄 Normal bitme başarısız. Çift kontrolü deneniyor...");
-
   for (let i = 0; i < hand.length; i++) {
     const possibleExtra = hand[i];
     const fourteenTiles = hand.filter((_, idx) => idx !== i);
@@ -323,26 +301,19 @@ function checkPairsWinning(hand, okeyTile) {
   console.log("🔍 Çift bitiş kontrolü başladı");
   console.log("El:", hand.map(t => tileToString(t)).join(', '));
 
-  // Okey taşlarını ve normal taşları ayır
   const wildcards = hand.filter(t => isWildcard(t, okeyTile));
   const normals = hand.filter(t => !isWildcard(t, okeyTile));
 
   console.log("Okey sayısı:", wildcards.length);
   console.log("Normal taş sayısı:", normals.length);
 
-  // Backtracking ile çift bul
   function findPairs(remaining, wilds, pairs) {
-    // Tüm taşlar eşleşti
     if (remaining.length === 0 && wilds.length === 0) {
       return { found: true, pairs };
     }
-
-    // Kalan taş sayısı tek ise ve wild yoksa başarısız
     if (remaining.length % 2 !== 0 && wilds.length === 0) {
       return { found: false };
     }
-
-    // Eğer normal taş kalmadıysa, wildcard'ları eşleştir
     if (remaining.length === 0) {
       if (wilds.length % 2 === 0) {
         const wildPairs = [];
@@ -354,22 +325,18 @@ function checkPairsWinning(hand, okeyTile) {
       return { found: false };
     }
 
-    // İlk taşı al
     const first = remaining[0];
     const rest = remaining.slice(1);
 
-    // Aynı taşı ara (çift)
     for (let i = 0; i < rest.length; i++) {
       const candidate = rest[i];
       if (candidate.color === first.color && candidate.number === first.number) {
-        // Çift bulundu
         const newRemaining = rest.filter((_, idx) => idx !== i);
         const result = findPairs(newRemaining, wilds, [...pairs, [first, candidate]]);
         if (result.found) return result;
       }
     }
 
-    // Çift bulunamadı, wildcard ile eşleştir
     if (wilds.length > 0) {
       const wild = wilds[0];
       const newWilds = wilds.slice(1);
