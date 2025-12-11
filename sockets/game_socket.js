@@ -223,6 +223,8 @@ module.exports = (io, socket, vipRooms) => {
       stateTable.discardPiles[playerId].push(tile);
     }
     stateTable.lastDiscardedTile = { tile, playerId };
+    stateTable.lastDiscarded = tile;
+    stateTable.lastDiscardedBy = playerId.toString();
     
     // Sırayı değiştir - info.table.players kullan
     const playerIds = info.table.players.map(p => p.id.toString());
@@ -236,10 +238,12 @@ module.exports = (io, socket, vipRooms) => {
     const nextIndex = (currentIndex + 1) % playerIds.length;
     const nextPlayerId = playerIds[nextIndex];
     
+    // Engine state ile tutarlı güncelleme
+    stateTable.currentTurnIndex = nextIndex;
     stateTable.currentTurnPlayerId = nextPlayerId;
-    stateTable.hasDrawn = false;  // engine ile tutarlı
+    stateTable.hasDrawn = false;
 
-    console.log(`🔄 Sıra değişti: ${playerId} -> ${nextPlayerId}`);
+    console.log(`🔄 Sıra değişti: ${playerId} -> ${nextPlayerId} (index: ${nextIndex})`);
     console.log(`📤 Atılan taş: ${tileToString(tile)}`);
 
     // Tutarlı field adları kullan - hem userId hem playerId gönder
@@ -489,9 +493,15 @@ module.exports = (io, socket, vipRooms) => {
     const stateTable = getTable(tableId);
     const uid = userId.toString();
 
+    console.log(`📥 game:draw_tile alındı: tableId=${tableId}, userId=${uid}`);
+    console.log(`   Mevcut sıra: ${stateTable.currentTurnPlayerId}, index: ${stateTable.currentTurnIndex}`);
+    console.log(`   hasDrawn: ${stateTable.hasDrawn}`);
+    console.log(`   El: ${stateTable.hands[uid]?.length || 0} taş`);
+
     const result = drawTileFromDeck(stateTable, uid);
 
     if (!result.success) {
+      console.log(`❌ drawTileFromDeck başarısız: ${result.reason}`);
       socket.emit("game:error", { message: result.reason });
 
       // Deste boşsa oyun biter
@@ -505,12 +515,14 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
-    console.log("✅ Taş çekildi (ortadan):", result.tile);
+    console.log("✅ Taş çekildi (ortadan):", tileToString(result.tile));
+    console.log(`   Yeni el: ${stateTable.hands[uid]?.length || 0} taş, hasDrawn: ${stateTable.hasDrawn}`);
 
     // Sadece çeken oyuncuya taşı gönder
     socket.emit("game:tile_drawn", {
       tableId,
       userId: uid,
+      playerId: uid,
       tile: result.tile,
       deckCount: result.deckRemaining,
       source: "deck"
@@ -581,6 +593,10 @@ module.exports = (io, socket, vipRooms) => {
     const stateTable = getTable(tableId);
     const uid = userId.toString();
 
+    console.log(`📥 game:discard_tile alındı: tableId=${tableId}, userId=${uid}`);
+    console.log(`   Mevcut sıra: ${stateTable.currentTurnPlayerId}, index: ${stateTable.currentTurnIndex}`);
+    console.log(`   hasDrawn: ${stateTable.hasDrawn}`);
+
     // Tile objesini oluştur
     const tileObj = {
       color: tile.color,
@@ -591,11 +607,13 @@ module.exports = (io, socket, vipRooms) => {
     const result = discardTile(stateTable, uid, tileObj);
 
     if (!result.success) {
+      console.log(`❌ discardTile başarısız: ${result.reason}`);
       socket.emit("game:error", { message: result.reason });
       return;
     }
 
-    console.log("✅ Taş atıldı:", result.discardedTile, "-> Sıra:", result.nextPlayerId);
+    console.log("✅ Taş atıldı:", tileToString(result.discardedTile));
+    console.log(`   Yeni sıra: ${result.nextPlayerId}, index: ${stateTable.currentTurnIndex}`);
 
     // Herkese bildir - tutarlı field adları
     io.to(tableId).emit("game:tile_discarded", {
