@@ -10,16 +10,14 @@ const {
   discardTile,
   finishGame,
   startNewRound,
-  getGameState
+  getGameState,
+  processBotTurn
 } = require("../engine/game_state");
 
 const { sameTile } = require("../engine/tile_util");
+const { replacePlayerWithBot } = require("../engine/table_manager");
 
 module.exports = (io, socket, vipRooms) => {
-
-  // ═══════════════════════════════════════════════════════════
-  // YARDIMCI FONKSİYONLAR
-  // ═══════════════════════════════════════════════════════════
 
   function findTableInRooms(tableId) {
     for (const room of vipRooms) {
@@ -40,10 +38,6 @@ module.exports = (io, socket, vipRooms) => {
     stateTable.ownerId = roomTable.ownerId;
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // MASAYA KATILMA
-  // ═══════════════════════════════════════════════════════════
-
   socket.on("game:join_table", ({ tableId, userId }) => {
     console.log("🎮 game:join_table -", { tableId, userId, socketId: socket.id });
 
@@ -57,7 +51,6 @@ module.exports = (io, socket, vipRooms) => {
     const { table: roomTable } = info;
     const stateTable = getTable(tableId);
 
-    // Owner belirleme
     if (!roomTable.ownerId) {
       roomTable.ownerId = userId;
     }
@@ -65,7 +58,6 @@ module.exports = (io, socket, vipRooms) => {
     roomTable.players = roomTable.players || [];
     roomTable.ready = roomTable.ready || {};
 
-    // Oyuncu ekle veya güncelle
     let user = roomTable.players.find(p => p.id.toString() === String(userId));
 
     if (!user) {
@@ -73,7 +65,8 @@ module.exports = (io, socket, vipRooms) => {
         id: userId,
         name: "Oyuncu" + (roomTable.players.length + 1),
         avatar: "",
-        socketId: socket.id
+        socketId: socket.id,
+        isBot: false
       };
       roomTable.players.push(user);
     } else {
@@ -82,7 +75,6 @@ module.exports = (io, socket, vipRooms) => {
 
     roomTable.ready[user.id.toString()] = false;
 
-    // State table'ı senkronize et
     syncTablePlayers(roomTable, stateTable);
 
     socket.join(tableId);
@@ -99,10 +91,6 @@ module.exports = (io, socket, vipRooms) => {
 
     console.log("✅ Oyuncu masaya eklendi:", user.id, "Socket:", socket.id);
   });
-
-  // ═══════════════════════════════════════════════════════════
-  // HAZIR DURUMU
-  // ═══════════════════════════════════════════════════════════
 
   socket.on("game:set_ready", ({ tableId, userId, ready }) => {
     const info = findTableInRooms(tableId);
@@ -125,10 +113,6 @@ module.exports = (io, socket, vipRooms) => {
     console.log("✅ Hazır durumu değişti:", uid, "->", ready);
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // OYUN BAŞLATMA
-  // ═══════════════════════════════════════════════════════════
-
   socket.on("game:start", (payload) => {
     const tableId = payload?.tableId;
     const startingPoints = payload?.startingPoints || 20;
@@ -147,13 +131,11 @@ module.exports = (io, socket, vipRooms) => {
     const { table: roomTable } = info;
     const stateTable = getTable(tableId);
 
-    // 4 oyuncu kontrolü
     if (roomTable.players.length !== 4) {
       socket.emit("game:error", { message: "4 oyuncu gerekli" });
       return;
     }
 
-    // Tüm oyuncular hazır mı?
     const allReady = roomTable.players.every(p => {
       return roomTable.ready[p.id.toString()] === true;
     });
@@ -163,15 +145,12 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
-    // Başlangıç puanını ayarla
     const validPoints = [5, 7, 20];
     stateTable.settings.startingPoints = validPoints.includes(startingPoints) ? startingPoints : 20;
     console.log("📊 Başlangıç puanı:", stateTable.settings.startingPoints);
 
-    // State table'ı senkronize et
     syncTablePlayers(roomTable, stateTable);
 
-    // ENGINE İLE TAŞ DAĞIT
     const result = dealTiles(stateTable);
 
     if (!result.success) {
@@ -185,8 +164,6 @@ module.exports = (io, socket, vipRooms) => {
     console.log("   Başlangıç oyuncusu:", result.startingPlayerId);
     console.log("   Deste:", result.deckSize, "taş");
 
-    // TÜM OYUNCULARA OYUN DURUMUNU GÖNDER
-    // Her oyuncu kendi elini alacak
     io.to(tableId).emit("game:state_changed", {
       tableId,
       hands: stateTable.hands,
@@ -202,10 +179,6 @@ module.exports = (io, socket, vipRooms) => {
     console.log("✅ game:state_changed event gönderildi");
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // ORTADAN TAŞ ÇEKME
-  // ═══════════════════════════════════════════════════════════
-
   socket.on("game:draw_tile", ({ tableId, userId }) => {
     const stateTable = getTable(tableId);
     const uid = userId.toString();
@@ -215,7 +188,6 @@ module.exports = (io, socket, vipRooms) => {
     if (!result.success) {
       socket.emit("game:error", { message: result.reason });
 
-      // Deste boşsa oyun biter
       if (result.reason === "Deste boş") {
         io.to(tableId).emit("game:finished", {
           tableId,
@@ -228,7 +200,6 @@ module.exports = (io, socket, vipRooms) => {
 
     console.log("✅ Taş çekildi (ortadan):", result.tile);
 
-    // Sadece çeken oyuncuya taşı gönder
     socket.emit("game:tile_drawn", {
       tableId,
       userId: uid,
@@ -237,17 +208,12 @@ module.exports = (io, socket, vipRooms) => {
       source: "deck"
     });
 
-    // Diğerlerine deste güncellemesi
     socket.to(tableId).emit("game:deck_updated", {
       tableId,
       deckCount: result.deckRemaining,
       drawerId: uid
     });
   });
-
-  // ═══════════════════════════════════════════════════════════
-  // SOLDAN TAŞ ALMA
-  // ═══════════════════════════════════════════════════════════
 
   socket.on("game:draw_from_discard", ({ tableId, userId }) => {
     const stateTable = getTable(tableId);
@@ -262,7 +228,6 @@ module.exports = (io, socket, vipRooms) => {
 
     console.log("✅ Taş çekildi (soldan):", result.tile);
 
-    // Çeken oyuncuya taşı gönder
     socket.emit("game:tile_drawn", {
       tableId,
       userId: uid,
@@ -271,22 +236,16 @@ module.exports = (io, socket, vipRooms) => {
       source: "discard"
     });
 
-    // Diğerlerine bildir
     socket.to(tableId).emit("game:tile_taken_from_discard", {
       tableId,
       takerId: uid
     });
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // TAŞ ATMA
-  // ═══════════════════════════════════════════════════════════
-
   socket.on("game:discard_tile", ({ tableId, userId, tile }) => {
     const stateTable = getTable(tableId);
     const uid = userId.toString();
 
-    // Tile objesini oluştur
     const tileObj = {
       color: tile.color,
       number: tile.number,
@@ -302,7 +261,6 @@ module.exports = (io, socket, vipRooms) => {
 
     console.log("✅ Taş atıldı:", result.discardedTile, "-> Sıra:", result.nextPlayerId);
 
-    // Herkese bildir
     io.to(tableId).emit("game:tile_discarded", {
       tableId,
       tile: result.discardedTile,
@@ -310,7 +268,6 @@ module.exports = (io, socket, vipRooms) => {
       nextTurn: result.nextPlayerId
     });
 
-    // El bittiyse kontrol et
     const hand = stateTable.hands[uid];
     if (hand && hand.length === 0) {
       io.to(tableId).emit("game:finished", {
@@ -320,11 +277,34 @@ module.exports = (io, socket, vipRooms) => {
       });
       console.log("🏆 OYUN BİTTİ! Kazanan:", uid);
     }
-  });
 
-  // ═══════════════════════════════════════════════════════════
-  // OYUNU BİTİRME (OKEY İLE)
-  // ═══════════════════════════════════════════════════════════
+    // 👇 YENİ: Bir sonraki oyuncu bot ise, otomatik hamle yap
+    const nextPlayer = stateTable.players.find(p => p.id.toString() === result.nextPlayerId);
+    if (nextPlayer && nextPlayer.isBot) {
+      setTimeout(() => {
+        const botResult = processBotTurn(stateTable);
+        if (!botResult) return;
+
+        if (botResult.type === 'bot_discard') {
+          io.to(tableId).emit("game:tile_discarded", {
+            tableId,
+            tile: botResult.discarded,
+            userId: nextPlayer.id,
+            nextTurn: botResult.nextPlayerId
+          });
+        } else if (botResult.type === 'bot_won') {
+          io.to(tableId).emit("game:round_finished", {
+            tableId,
+            winnerId: botResult.winnerId,
+            winnerName: botResult.winnerName,
+            tableScores: botResult.tableScores,
+            gameOver: botResult.gameOver,
+            reason: "Bot kazandı!"
+          });
+        }
+      }, 500); // Kısa gecikme ile daha doğal hissettir
+    }
+  });
 
   socket.on("game:finish", ({ tableId, userId }) => {
     const stateTable = getTable(tableId);
@@ -346,18 +326,14 @@ module.exports = (io, socket, vipRooms) => {
       winnerId: result.winnerId,
       winnerName: result.winnerName,
       
-      // El sonucu
       roundResult: result.roundResult,
       
-      // Güncel puanlar
       tableScores: result.tableScores,
       
-      // Oyun tamamen bitti mi?
       gameOver: result.gameOver,
       loser: result.loser,
       loserName: result.loserName,
       
-      // Bitiş detayları
       groups: result.groups,
       usedOkey: result.usedOkey,
       discardedIsOkey: result.roundResult.discardedIsOkey,
@@ -368,10 +344,6 @@ module.exports = (io, socket, vipRooms) => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // YENİ EL BAŞLAT
-  // ═══════════════════════════════════════════════════════════
-
   socket.on("game:new_round", ({ tableId, userId }) => {
     const stateTable = getOrCreateTable(tableId);
     const uid = userId.toString();
@@ -379,7 +351,6 @@ module.exports = (io, socket, vipRooms) => {
     console.log("🔄 Yeni el isteği:", uid, "masa:", tableId);
     console.log("📊 Masa sahibi:", stateTable.ownerId);
 
-    // Sadece masa sahibi yeni el başlatabilir
     if (stateTable.ownerId !== uid) {
       socket.emit("game:error", { message: "Sadece masa sahibi yeni el başlatabilir" });
       return;
@@ -398,7 +369,6 @@ module.exports = (io, socket, vipRooms) => {
     console.log("📊 Başlangıç oyuncusu:", result.startingPlayerId);
     console.log("📊 Deste:", result.deckSize, "taş");
 
-    // Tüm oyunculara gönder (ilk başlangıçla aynı format)
     io.to(tableId).emit("game:state_changed", {
       tableId,
       hands: stateTable.hands,
@@ -415,10 +385,6 @@ module.exports = (io, socket, vipRooms) => {
     console.log("✅ Yeni el game:state_changed gönderildi");
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // MASADAN AYRILMA
-  // ═══════════════════════════════════════════════════════════
-
   socket.on("game:leave_table", ({ tableId, userId }) => {
     const info = findTableInRooms(tableId);
     if (!info) return;
@@ -427,13 +393,11 @@ module.exports = (io, socket, vipRooms) => {
     const stateTable = getTable(tableId);
     const uid = userId.toString();
 
-    // Room table'dan çıkar
     roomTable.players = (roomTable.players || []).filter(
       p => p.id.toString() !== uid
     );
     delete roomTable.ready?.[uid];
 
-    // State table'dan çıkar
     stateTable.players = stateTable.players.filter(
       p => p.id.toString() !== uid
     );
@@ -453,17 +417,12 @@ module.exports = (io, socket, vipRooms) => {
       ready: roomTable.ready || {}
     });
 
-    // Masa boşsa reset
     if (roomTable.players.length === 0) {
       resetTable(stateTable);
     }
 
     console.log("👋 Oyuncu ayrıldı:", uid);
   });
-
-  // ═══════════════════════════════════════════════════════════
-  // OYUN DURUMU İSTEME
-  // ═══════════════════════════════════════════════════════════
 
   socket.on("game:get_state", ({ tableId, userId }) => {
     const stateTable = getTable(tableId);
@@ -478,11 +437,35 @@ module.exports = (io, socket, vipRooms) => {
   });
 
   // ═══════════════════════════════════════════════════════════
-  // BAĞLANTI KOPMA
+  // BAĞLANTI KOPMA → BOT ATAMA
   // ═══════════════════════════════════════════════════════════
-
   socket.on("disconnect", () => {
     console.log("❌ Game socket disconnected:", socket.id);
+
+    for (const room of vipRooms) {
+      if (!room.tables) continue;
+      for (const table of room.tables) {
+        const player = table.players.find(p => p.socketId === socket.id);
+        if (player && !player.isBot) {
+          console.log(`🔌 Oyuncu bağlantısı koptu: ${player.name} (${player.id})`);
+
+          setTimeout(() => {
+            const stillConnected = table.players.some(p => p.socketId === socket.id);
+            if (stillConnected) return;
+
+            const success = replacePlayerWithBot(room, table.id, player.id);
+            if (success) {
+              console.log(`🤖 Oyuncu bot ile değiştirildi: ${player.name}`);
+              io.to(table.id).emit('playerReplacedByBot', {
+                playerId: player.id,
+                botName: `Bot-${player.name}`
+              });
+            }
+          }, 10000);
+          break;
+        }
+      }
+    }
 
     socket.rooms.forEach(roomId => {
       if (roomId !== socket.id) {
