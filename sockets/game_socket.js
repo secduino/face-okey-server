@@ -159,8 +159,8 @@ module.exports = (io, socket, vipRooms) => {
     const result = botMakeMove(stateTable, botPlayerId);
 
     if (result.action === "draw") {
-      // hasDrawnThisTurn güncelle (bot için de geçerli)
-      stateTable.hasDrawnThisTurn = true;
+      // hasDrawn güncelle (bot için de geçerli) - engine ile tutarlı
+      stateTable.hasDrawn = true;
       
       // Taş çekti - herkese bildir
       io.to(tableId).emit("game:tile_drawn", {
@@ -205,7 +205,7 @@ module.exports = (io, socket, vipRooms) => {
     }
   }
 
-  // Taş atma broadcast
+  // Taş atma broadcast - Bot ve normal oyuncu için ortak
   function broadcastDiscard(tableId, playerId, tile, stateTable) {
     const info = findTableInRooms(tableId);
     if (!info) {
@@ -213,9 +213,20 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
     
+    // Discard pile'a taşı ekle (eğer eklenmemişse)
+    if (!stateTable.discardPiles[playerId]) {
+      stateTable.discardPiles[playerId] = [];
+    }
+    // Bot zaten ekledi mi kontrol et
+    const lastDiscard = stateTable.discardPiles[playerId].slice(-1)[0];
+    if (!lastDiscard || !sameTile(lastDiscard, tile)) {
+      stateTable.discardPiles[playerId].push(tile);
+    }
+    stateTable.lastDiscardedTile = { tile, playerId };
+    
     // Sırayı değiştir - info.table.players kullan
     const playerIds = info.table.players.map(p => p.id.toString());
-    const currentIndex = playerIds.indexOf(playerId);
+    const currentIndex = playerIds.indexOf(playerId.toString());
     
     if (currentIndex === -1) {
       console.log("❌ broadcastDiscard: Oyuncu bulunamadı", playerId);
@@ -226,16 +237,19 @@ module.exports = (io, socket, vipRooms) => {
     const nextPlayerId = playerIds[nextIndex];
     
     stateTable.currentTurnPlayerId = nextPlayerId;
-    stateTable.hasDrawnThisTurn = false;
+    stateTable.hasDrawn = false;  // engine ile tutarlı
 
     console.log(`🔄 Sıra değişti: ${playerId} -> ${nextPlayerId}`);
+    console.log(`📤 Atılan taş: ${tileToString(tile)}`);
 
+    // Tutarlı field adları kullan - hem userId hem playerId gönder
     io.to(tableId).emit("game:tile_discarded", {
       tableId,
-      playerId,
+      playerId: playerId.toString(),
+      userId: playerId.toString(),  // Geriye uyumluluk
       tile,
       nextPlayerId: nextPlayerId,
-      nextTurn: nextPlayerId
+      nextTurn: nextPlayerId  // Geriye uyumluluk
     });
 
     // Sonraki oyuncu bot mu?
@@ -518,6 +532,19 @@ module.exports = (io, socket, vipRooms) => {
     const stateTable = getTable(tableId);
     const uid = userId.toString();
 
+    // Taşı almadan önce kimin taşını alacağımızı belirle
+    const info = findTableInRooms(tableId);
+    let fromPlayerId = null;
+    if (info) {
+      const playerIds = info.table.players.map(p => p.id.toString());
+      const myIndex = playerIds.indexOf(uid);
+      if (myIndex !== -1) {
+        // Soldaki oyuncu (saat yönünün tersine bir önceki)
+        const leftIndex = (myIndex + 3) % playerIds.length;
+        fromPlayerId = playerIds[leftIndex];
+      }
+    }
+
     const result = drawTileFromDiscard(stateTable, uid);
 
     if (!result.success) {
@@ -525,21 +552,24 @@ module.exports = (io, socket, vipRooms) => {
       return;
     }
 
-    console.log("✅ Taş çekildi (soldan):", result.tile);
+    console.log("✅ Taş çekildi (soldan):", result.tile, "fromPlayer:", fromPlayerId);
 
     // Çeken oyuncuya taşı gönder
     socket.emit("game:tile_drawn", {
       tableId,
       userId: uid,
+      playerId: uid,
       tile: result.tile,
       deckCount: stateTable.deck.length,
-      source: "discard"
+      source: "discard",
+      fromPlayerId: fromPlayerId
     });
 
     // Diğerlerine bildir
     socket.to(tableId).emit("game:tile_taken_from_discard", {
       tableId,
-      takerId: uid
+      takerId: uid,
+      fromPlayerId: fromPlayerId
     });
   });
 
@@ -567,12 +597,14 @@ module.exports = (io, socket, vipRooms) => {
 
     console.log("✅ Taş atıldı:", result.discardedTile, "-> Sıra:", result.nextPlayerId);
 
-    // Herkese bildir
+    // Herkese bildir - tutarlı field adları
     io.to(tableId).emit("game:tile_discarded", {
       tableId,
       tile: result.discardedTile,
-      userId: uid,
-      nextTurn: result.nextPlayerId
+      playerId: uid,
+      userId: uid,  // Geriye uyumluluk
+      nextPlayerId: result.nextPlayerId,
+      nextTurn: result.nextPlayerId  // Geriye uyumluluk
     });
 
     // Sonraki oyuncu bot mu? Bot ise hamle yaptır
