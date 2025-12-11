@@ -298,14 +298,8 @@ function checkWinning(hand, okeyTile) {
 function checkPairsWinning(hand, okeyTile) {
   if (hand.length !== 14) return { won: false, reason: "14 taş gerekli" };
 
-  console.log("🔍 Çift bitiş kontrolü başladı");
-  console.log("El:", hand.map(t => tileToString(t)).join(', '));
-
   const wildcards = hand.filter(t => isWildcard(t, okeyTile));
   const normals = hand.filter(t => !isWildcard(t, okeyTile));
-
-  console.log("Okey sayısı:", wildcards.length);
-  console.log("Normal taş sayısı:", normals.length);
 
   function findPairs(remaining, wilds, pairs) {
     if (remaining.length === 0 && wilds.length === 0) {
@@ -350,14 +344,10 @@ function checkPairsWinning(hand, okeyTile) {
   const result = findPairs(normals, wildcards, []);
 
   if (result.found) {
-    console.log("✅ Çift bitiş başarılı! Çiftler:");
-    result.pairs.forEach((pair, idx) => {
-      console.log(`  Çift ${idx + 1}: ${tileToString(pair[0])} - ${tileToString(pair[1])}`);
-    });
+    console.log("✅ Çift bitiş başarılı! 7 çift bulundu");
     return { won: true, pairs: result.pairs, isPairsWin: true };
   }
 
-  console.log("❌ Çift bitiş başarısız");
   return { won: false, reason: "7 çift oluşturulamadı" };
 }
 
