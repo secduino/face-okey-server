@@ -7,8 +7,6 @@
 // Her masa 4 oyuncu alır.
 // -------------------------------------------------------------
 
-const Bot = require('./Bot');
-
 const {
   tables,
   getOrCreateTable,
@@ -90,8 +88,7 @@ function addPlayerToTable(room, tableId, user) {
     id: user.id,
     name: user.name || "Oyuncu",
     avatar: user.avatar || "",
-    isGuest: user.isGuest ?? true,
-    isBot: false
+    isGuest: user.isGuest ?? true
   });
 
   table.ready[user.id] = false;
@@ -217,50 +214,6 @@ function findPlayerTable(room, userId) {
 }
 
 // -------------------------------------------------------------
-// MASAYA BOT EKLE
-// -------------------------------------------------------------
-function addBotToTable(room, tableId, botName = 'Bot') {
-  const table = findTable(room, tableId);
-  if (!table || table.players.length >= 4) return false;
-
-  const bot = new Bot(botName);
-  table.players.push(bot);
-  table.ready[bot.id] = true;
-
-  const state = getOrCreateTable(tableId);
-  state.players = table.players;
-  state.ready = table.ready;
-
-  return true;
-}
-
-// -------------------------------------------------------------
-// OYUNCUYU BOT İLE DEĞİŞTİR
-// -------------------------------------------------------------
-function replacePlayerWithBot(room, tableId, playerId) {
-  const table = findTable(room, tableId);
-  if (!table) return false;
-
-  const playerIndex = table.players.findIndex(p => p.id.toString() === playerId.toString());
-  if (playerIndex === -1) return false;
-
-  const oldPlayer = table.players[playerIndex];
-  if (oldPlayer.isBot) return false;
-
-  const bot = new Bot(`Bot-${oldPlayer.name}`, oldPlayer.hand || []);
-  bot.id = oldPlayer.id;
-
-  table.players[playerIndex] = bot;
-  table.ready[bot.id] = true;
-
-  const state = getOrCreateTable(tableId);
-  state.players = table.players;
-  state.ready = table.ready;
-
-  return true;
-}
-
-// -------------------------------------------------------------
 module.exports = {
   createTable,
   removeTable,
@@ -273,7 +226,5 @@ module.exports = {
   setPlayerReady,
   allPlayersReady,
   startGame,
-  findPlayerTable,
-  addBotToTable,
-  replacePlayerWithBot
+  findPlayerTable
 };
