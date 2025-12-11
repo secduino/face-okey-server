@@ -159,6 +159,9 @@ module.exports = (io, socket, vipRooms) => {
     const result = botMakeMove(stateTable, botPlayerId);
 
     if (result.action === "draw") {
+      // hasDrawnThisTurn güncelle (bot için de geçerli)
+      stateTable.hasDrawnThisTurn = true;
+      
       // Taş çekti - herkese bildir
       io.to(tableId).emit("game:tile_drawn", {
         tableId,
