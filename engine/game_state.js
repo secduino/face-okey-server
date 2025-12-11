@@ -11,8 +11,6 @@
 // - 0'a düşen oyuncu oyunu kaybeder
 // -------------------------------------------------------------
 
-const Bot = require('./Bot');
-
 const { generateFullSet } = require("./tile_set");
 const { sameTile, sortTiles, isWildcard } = require("./tile_util");
 const { 
@@ -44,11 +42,13 @@ function createEmptyTable(tableId) {
     players: [],
     ready: {},
     
+    // Masa ayarları
     settings: {
-      startingPoints: 20,
-      basePoints: 1000
+      startingPoints: 20,  // 5, 13, 20 seçenekleri
+      basePoints: 1000     // Genel puan (ranking için)
     },
     
+    // Oyun durumu
     deck: [],
     hands: {},
     discardPiles: {},
@@ -62,8 +62,9 @@ function createEmptyTable(tableId) {
     currentTurnIndex: 0,
     hasDrawn: false,
     
-    tableScores: {},
-    totalScores: {},
+    // Puanlama
+    tableScores: {},      // Masa içi puan (düşmeli sistem)
+    totalScores: {},      // Genel puan (1000 üzerinden)
     
     gameStarted: false,
     gameEnded: false,
@@ -74,6 +75,9 @@ function createEmptyTable(tableId) {
   };
 }
 
+// -------------------------------------------------------------
+// MASA AYARLARINI GÜNCELLE
+// -------------------------------------------------------------
 function updateTableSettings(table, settings) {
   if (settings.startingPoints) {
     const valid = [5, 13, 20];
@@ -84,6 +88,9 @@ function updateTableSettings(table, settings) {
   return table.settings;
 }
 
+// -------------------------------------------------------------
+// MASA SIFIRLAMA (Yeni el için)
+// -------------------------------------------------------------
 function resetTableForNewRound(table) {
   table.deck = [];
   table.hands = {};
@@ -100,6 +107,9 @@ function resetTableForNewRound(table) {
   table.winner = null;
 }
 
+// -------------------------------------------------------------
+// TAŞ DAĞITIMI
+// -------------------------------------------------------------
 function dealTiles(table) {
   const players = table.players.map(p => p.id.toString());
   
@@ -112,6 +122,7 @@ function dealTiles(table) {
   table.indicator = indicator;
   table.okeyTile = okeyTile;
   
+  // Rastgele başlangıç oyuncusu
   const startingPlayerIndex = Math.floor(Math.random() * 4);
   const startingPlayerId = players[startingPlayerIndex];
   
@@ -130,6 +141,7 @@ function dealTiles(table) {
     table.hands[playerId] = deckCopy.splice(0, tileCount);
     table.discardPiles[playerId] = [];
     
+    // İlk el ise başlangıç puanlarını ver
     if (!table.tableScores[playerId]) {
       table.tableScores[playerId] = table.settings.startingPoints;
       table.totalScores[playerId] = table.settings.basePoints;
@@ -154,6 +166,9 @@ function dealTiles(table) {
   };
 }
 
+// -------------------------------------------------------------
+// ORTADAN TAŞ ÇEK
+// -------------------------------------------------------------
 function drawTileFromDeck(table, userId) {
   const uid = userId.toString();
   
@@ -184,6 +199,9 @@ function drawTileFromDeck(table, userId) {
   };
 }
 
+// -------------------------------------------------------------
+// SOLDAN TAŞ AL
+// -------------------------------------------------------------
 function drawTileFromDiscard(table, userId) {
   const uid = userId.toString();
   
@@ -222,6 +240,9 @@ function drawTileFromDiscard(table, userId) {
   return { success: true, tile: tile };
 }
 
+// -------------------------------------------------------------
+// TAŞ AT
+// -------------------------------------------------------------
 function discardTile(table, userId, tile) {
   const uid = userId.toString();
   
@@ -264,58 +285,14 @@ function discardTile(table, userId, tile) {
   };
 }
 
-// 👇 YENİ: BOT OTOMATİK HAMLE
-function processBotTurn(table) {
-  const currentPlayer = table.players[table.currentTurnIndex];
-  if (!currentPlayer || !currentPlayer.isBot) {
-    return null;
-  }
-
-  const result = currentPlayer.makeMove(table.deck, table.discardPiles[currentPlayer.id], table.okeyTile);
-
-  if (result.action === 'win') {
-    table.gameEnded = true;
-    table.winner = currentPlayer.id;
-
-    const players = table.players.map(p => p.id.toString());
-    const scoreChanges = {};
-    for (const pid of players) {
-      if (pid === currentPlayer.id) {
-        scoreChanges[pid] = 0;
-      } else {
-        scoreChanges[pid] = -2;
-        table.tableScores[pid] = Math.max(0, (table.tableScores[pid] || 0) - 2);
-      }
-    }
-
-    return {
-      type: 'bot_won',
-      winnerId: currentPlayer.id,
-      winnerName: currentPlayer.name,
-      tableScores: { ...table.tableScores },
-      gameOver: Object.values(table.tableScores).some(s => s <= 0)
-    };
-  }
-
-  if (result.action === 'discard') {
-    table.lastDiscarded = result.discarded;
-    table.lastDiscardedBy = currentPlayer.id;
-
-    const nextIndex = getNextPlayerIndex(table.currentTurnIndex);
-    table.currentTurnIndex = nextIndex;
-    table.currentTurnPlayerId = table.players[nextIndex].id.toString();
-    table.hasDrawn = false;
-
-    return {
-      type: 'bot_discard',
-      discarded: result.discarded,
-      nextPlayerId: table.currentTurnPlayerId
-    };
-  }
-
-  return null;
-}
-
+// -------------------------------------------------------------
+// OYUNU BİTİR
+// 
+// Puanlama:
+// - Normal bitiş: 2 puan
+// - Çift bitiş: 4 puan
+// - Okey ile bitiş: Puan x4
+// -------------------------------------------------------------
 function finishGame(table, userId) {
   const uid = userId.toString();
   
@@ -335,26 +312,41 @@ function finishGame(table, userId) {
     return { success: false, reason: result.reason || "Geçersiz el" };
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // PUANLAMA HESAPLA
+  // ═══════════════════════════════════════════════════════════
+  
+  // Atılan taş okey mi?
   const discardedIsOkey = result.discardedTile && 
     isWildcard(result.discardedTile, table.okeyTile);
   
-  let basePenalty = 2;
+  // Temel puan
+  let basePenalty = 2; // Normal bitiş
+  
+  // Çift bitiş kontrolü (7 çift ile bitirme - ayrı kontrol gerekir)
+  // Şimdilik sadece normal bitiş
+  
+  // Okey ile bitirildiyse x4
   if (discardedIsOkey) {
     basePenalty = basePenalty * 4;
   }
   
+  // Puan değişiklikleri
   const scoreChanges = {};
   const players = table.players.map(p => p.id.toString());
   
   for (const playerId of players) {
     if (playerId === uid) {
+      // Kazanan puanı değişmez
       scoreChanges[playerId] = 0;
     } else {
+      // Diğerleri puan kaybeder
       scoreChanges[playerId] = -basePenalty;
       table.tableScores[playerId] = Math.max(0, (table.tableScores[playerId] || 0) - basePenalty);
     }
   }
   
+  // Oyun bitti mi? (Birinin puanı 0'a düştü mü?)
   let gameOver = false;
   let loser = null;
   
@@ -369,6 +361,7 @@ function finishGame(table, userId) {
   table.gameEnded = true;
   table.winner = uid;
   
+  // Son taşı ortaya bırak
   if (result.discardedTile) {
     table.discardPiles[uid].push(result.discardedTile);
     table.hands[uid] = table.hands[uid].filter(t => !sameTile(t, result.discardedTile));
@@ -380,23 +373,30 @@ function finishGame(table, userId) {
     winnerId: uid,
     winnerName: table.players.find(p => p.id.toString() === uid)?.name || 'Oyuncu',
     
+    // El sonucu
     roundResult: {
       basePenalty: basePenalty,
       discardedIsOkey: discardedIsOkey,
       scoreChanges: scoreChanges
     },
     
+    // Güncel puanlar
     tableScores: table.tableScores,
     
+    // Oyun tamamen bitti mi?
     gameOver: gameOver,
     loser: loser,
     loserName: loser ? table.players.find(p => p.id.toString() === loser)?.name : null,
     
+    // Gruplar (debug)
     groups: result.groups,
     usedOkey: result.usedOkey
   };
 }
 
+// -------------------------------------------------------------
+// ÇİFT BİTİRME (7 çift)
+// -------------------------------------------------------------
 function finishWithPairs(table, userId) {
   const uid = userId.toString();
   
@@ -406,6 +406,7 @@ function finishWithPairs(table, userId) {
   
   const hand = table.hands[uid];
   
+  // Çift bitiş için 14 taş gerekli (taş çekmeden bitirir)
   if (hand.length !== 14) {
     return { success: false, reason: "Çift bitiş için 14 taş gerekli" };
   }
@@ -416,6 +417,7 @@ function finishWithPairs(table, userId) {
     return { success: false, reason: result.reason || "7 çift yok" };
   }
 
+  // Çift bitiş: 4 puan
   const basePenalty = 4;
   
   const scoreChanges = {};
@@ -466,17 +468,26 @@ function finishWithPairs(table, userId) {
   };
 }
 
+// -------------------------------------------------------------
+// YENİ EL BAŞLAT
+// -------------------------------------------------------------
 function startNewRound(table) {
   table.roundNumber = (table.roundNumber || 0) + 1;
   resetTableForNewRound(table);
   return dealTiles(table);
 }
 
+// -------------------------------------------------------------
+// OYUNCU ELİNİ AL
+// -------------------------------------------------------------
 function getPlayerHand(table, userId) {
   const uid = userId.toString();
   return table.hands[uid] || [];
 }
 
+// -------------------------------------------------------------
+// OYUN DURUMUNU AL
+// -------------------------------------------------------------
 function getGameState(table, userId) {
   const uid = userId.toString();
   
@@ -504,7 +515,6 @@ function getGameState(table, userId) {
       id: p.id,
       name: p.name,
       avatar: p.avatar,
-      isBot: !!p.isBot,
       tileCount: (table.hands[p.id.toString()] || []).length,
       discardCount: (table.discardPiles[p.id.toString()] || []).length,
       tableScore: table.tableScores[p.id.toString()] || 0,
@@ -517,6 +527,7 @@ function getGameState(table, userId) {
   };
 }
 
+// -------------------------------------------------------------
 module.exports = {
   tables,
   getOrCreateTable,
@@ -531,6 +542,5 @@ module.exports = {
   finishWithPairs,
   startNewRound,
   getPlayerHand,
-  getGameState,
-  processBotTurn
+  getGameState
 };
