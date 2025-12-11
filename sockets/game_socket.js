@@ -204,24 +204,42 @@ module.exports = (io, socket, vipRooms) => {
 
   // Taş atma broadcast
   function broadcastDiscard(tableId, playerId, tile, stateTable) {
-    // Sırayı değiştir
-    const playerIds = stateTable.players.map(p => p.id.toString());
+    const info = findTableInRooms(tableId);
+    if (!info) {
+      console.log("❌ broadcastDiscard: Masa bulunamadı");
+      return;
+    }
+    
+    // Sırayı değiştir - info.table.players kullan
+    const playerIds = info.table.players.map(p => p.id.toString());
     const currentIndex = playerIds.indexOf(playerId);
+    
+    if (currentIndex === -1) {
+      console.log("❌ broadcastDiscard: Oyuncu bulunamadı", playerId);
+      return;
+    }
+    
     const nextIndex = (currentIndex + 1) % playerIds.length;
-    stateTable.currentTurnPlayerId = playerIds[nextIndex];
+    const nextPlayerId = playerIds[nextIndex];
+    
+    stateTable.currentTurnPlayerId = nextPlayerId;
     stateTable.hasDrawnThisTurn = false;
+
+    console.log(`🔄 Sıra değişti: ${playerId} -> ${nextPlayerId}`);
 
     io.to(tableId).emit("game:tile_discarded", {
       tableId,
       playerId,
       tile,
-      nextPlayerId: stateTable.currentTurnPlayerId
+      nextPlayerId: nextPlayerId,
+      nextTurn: nextPlayerId
     });
 
     // Sonraki oyuncu bot mu?
-    const nextPlayer = stateTable.players.find(p => p.id.toString() === stateTable.currentTurnPlayerId);
+    const nextPlayer = info.table.players.find(p => p.id.toString() === nextPlayerId);
     if (nextPlayer && nextPlayer.isBot) {
-      setTimeout(() => executeBotTurn(tableId, stateTable.currentTurnPlayerId), BOT_MOVE_DELAY);
+      console.log(`🤖 Sonraki oyuncu bot: ${nextPlayer.name}`);
+      setTimeout(() => executeBotTurn(tableId, nextPlayerId), BOT_MOVE_DELAY);
     }
   }
 
