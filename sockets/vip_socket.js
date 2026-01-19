@@ -59,7 +59,7 @@ module.exports = (io, socket, vipRooms) => {
     console.log("✅ VIP Oda oluşturuldu:", room.id, "Sahibi:", data.ownerId);
 
     socket.emit("vip:room_created", room);
-    
+
     // TÜM CLIENTLARA ODA LİSTESİNİ GÖNDER
     io.emit("vip:rooms", vipRooms);
   });
@@ -67,8 +67,12 @@ module.exports = (io, socket, vipRooms) => {
   // ---------------------------------------------------------
   // VIP ODAYA GİRİŞ
   // ---------------------------------------------------------
-  socket.on("vip:join_room", ({ roomId, user }) => {
-    console.log("🎮 vip:join_room event geldi:", { roomId, userId: user.id });
+  socket.on("vip:join_room", (data) => {
+    // user veya player olarak gelmiş olabilir
+    const user = data.user || data.player;
+    const roomId = data.roomId;
+
+    console.log("🎮 vip:join_room event geldi:", { roomId, userId: user?.id });
 
     const room = getRoom(roomId);
     if (!room) {
@@ -107,7 +111,7 @@ module.exports = (io, socket, vipRooms) => {
 
     // Tüm odaya oyuncu listesi
     io.to(roomId).emit("vip:room_users", room.players);
-    
+
     // Tüm odaya masa listesi
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
@@ -225,13 +229,13 @@ module.exports = (io, socket, vipRooms) => {
     room.tables.push(table);
 
     console.log("✅ Masa oluşturuldu:", table.id, "Owner:", ownerId);
-    
+
     // ✅ 1. OLUŞTURANA DOĞRUDAN GÖNDER
     socket.emit("vip:room_tables", room.tables);
-    
+
     // ✅ 2. TÜM ODAYA BROADCAST ET
     socket.to(roomId).emit("vip:room_tables", room.tables);
-    
+
     console.log("📤 vip:room_tables gönderildi (direct + broadcast), toplam masa:", room.tables.length);
   });
 
@@ -265,9 +269,9 @@ module.exports = (io, socket, vipRooms) => {
       ...table,
       ownerId: table.ownerId // Explicitly include ownerId
     });
-    
+
     console.log("📤 vip:table_joined gönderildi, ownerId:", table.ownerId);
-    
+
     // TÜM ODAYA MASA LİSTESİNİ GÖNDER
     io.to(roomId).emit("vip:room_tables", room.tables);
   });
@@ -299,7 +303,7 @@ module.exports = (io, socket, vipRooms) => {
   // ---------------------------------------------------------
   socket.on("disconnect", () => {
     console.log("❌ VIP socket disconnected:", socket.id);
-    
+
     // ✅ OYUNCUNUN TÜM ROOM'LARDAN VE MASALARDAN AYRILMASINI SAĞLA
     socket.rooms.forEach(roomId => {
       if (roomId !== socket.id) {
