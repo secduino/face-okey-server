@@ -31,14 +31,15 @@ const vipRoomSocket = require('./sockets/vip_room_socket');
 const gameSocket = require('./sockets/game_socket');
 
 // Player Manager
-const { 
-  STARTING_SCORE, 
-  getOrCreatePlayer, 
-  getLeaderboard 
+const {
+  STARTING_SCORE,
+  getOrCreatePlayer,
+  getLeaderboard
 } = require('./engine/player_manager');
 
 // VIP Rooms (eski - game_socket için)
-const vipRooms = require('./rooms/vipRooms');
+const vipRoomsModule = require('./rooms/vipRooms');
+const vipRooms = vipRoomsModule.vipRooms; // Array'i al
 
 // ═══════════════════════════════════════════════════════════
 // BAŞLATMA
@@ -57,7 +58,7 @@ console.log(`✅ Başlangıç puanı: ${STARTING_SCORE}`);
 
 // Sağlık kontrolü
 app.get('/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'ok',
     timestamp: Date.now(),
     startingScore: STARTING_SCORE,
@@ -66,44 +67,44 @@ app.get('/health', (req, res) => {
 
 // Free room listesi
 app.get('/api/rooms/free', (req, res) => {
-  res.json({ 
-    success: true, 
-    rooms: getRoomList() 
+  res.json({
+    success: true,
+    rooms: getRoomList()
   });
 });
 
 // VIP room listesi
 app.get('/api/rooms/vip', (req, res) => {
-  res.json({ 
-    success: true, 
-    rooms: getVipRoomList() 
+  res.json({
+    success: true,
+    rooms: getVipRoomList()
   });
 });
 
 // Liderlik tablosu
 app.get('/api/leaderboard', (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
-  res.json({ 
-    success: true, 
-    leaderboard: getLeaderboard(limit) 
+  res.json({
+    success: true,
+    leaderboard: getLeaderboard(limit)
   });
 });
 
 // Oyuncu bilgisi
 app.get('/api/player/:userId', (req, res) => {
   const player = getOrCreatePlayer(req.params.userId);
-  res.json({ 
-    success: true, 
-    player 
+  res.json({
+    success: true,
+    player
   });
 });
 
 // VIP abonelik fiyatları
 app.get('/api/vip/prices', (req, res) => {
   const { VIP_PRICES } = require('./rooms/vipRoomManager');
-  res.json({ 
-    success: true, 
-    prices: VIP_PRICES 
+  res.json({
+    success: true,
+    prices: VIP_PRICES
   });
 });
 
@@ -119,21 +120,21 @@ io.on("connection", (socket) => {
     const player = getOrCreatePlayer(userId, name);
     socket.userId = userId;
     socket.playerName = name;
-    
-    socket.emit('registered', { 
+
+    socket.emit('registered', {
       player,
-      startingScore: STARTING_SCORE 
+      startingScore: STARTING_SCORE
     });
-    
+
     console.log(`👤 Oyuncu kayıt: ${name} (${userId}) - Puan: ${player.score}`);
   });
 
   // Free Room Socket Events
   freeRoomSocket(io, socket);
-  
+
   // VIP Room Socket Events
   vipRoomSocket(io, socket);
-  
+
   // Game Socket Events (mevcut oyun mantığı)
   gameSocket(io, socket, vipRooms);
 
